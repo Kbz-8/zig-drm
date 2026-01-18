@@ -216,8 +216,8 @@ pub const DrmFormatMod = enum(u64) {
     pub const amd_pipe_shift = 33;
     pub const amd_pipe_mask = 0x7;
 
-    none = 0,
     invalid = 0x00ffffffffffffff,
+
     linear = fourccModCode(.none, 0),
 
     intel_x_tiled = fourccModCode(.intel, 1),
@@ -297,12 +297,12 @@ fn fourccModCode(vendor: Vendor, value: u56) u64 {
 }
 
 fn nvidiaBlockLinear2d(c: u3, s: u1, g: u2, k: u8, h: u4) u64 {
-    return fourccModCode(.nvidia, 0x10 |
-        (h & 0xf) |
-        ((k & 0xff) << 12) |
-        ((g & 0x3) << 20) |
-        ((s & 0x1) << 22) |
-        ((c) & 0x7) << 23);
+    return fourccModCode(.nvidia, @as(u56, 0x10) |
+        @as(u56, h & 0xf) |
+        (@as(u56, k & 0xff) << 12) |
+        (@as(u56, g & 0x3) << 20) |
+        (@as(u56, s & 0x1) << 22) |
+        (@as(u56, c) & 0x7) << 23);
 }
 
 fn nvidia16Bx2Block(v: u4) u64 {
@@ -317,4 +317,8 @@ const ArmModType = enum(u4) {
 
 fn armModCode(_type: ArmModType, val: u52) u64 {
     return fourccModCode(.arm, (@as(u64, @intFromEnum(_type)) << 52) | (val & 0x000fffffffffffff));
+}
+
+test {
+    @import("std").testing.refAllDecls(@This());
 }
