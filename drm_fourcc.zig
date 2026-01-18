@@ -129,6 +129,8 @@ pub const DrmFormat = enum(u32) {
     yvu422 = fourccCode('Y', 'V', '1', '6'),
     yuv444 = fourccCode('Y', 'U', '2', '4'),
     yvu444 = fourccCode('Y', 'V', '2', '4'),
+
+    _, // Some formats involved with dmabuf aren't defined here
 };
 
 /// Contains most DRM_FORMAT_MOD* definitions from `<drm/drm_fourcc.h>`
