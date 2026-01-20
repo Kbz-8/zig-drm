@@ -1,5 +1,4 @@
-/// Corresponds to DRM_FORMAT_* in `<drm/drm_fourcc.h>`
-pub const DrmFormat = enum(u32) {
+pub const Format = enum(u32) {
     pub const big_endian: u32 = 1 << 31;
 
     invalid = 0,
@@ -131,196 +130,165 @@ pub const DrmFormat = enum(u32) {
     yvu444 = fourccCode('Y', 'V', '2', '4'),
 
     _, // Some formats involved with dmabuf aren't defined here
+
+    fn fourccCode(a: u8, b: u8, c: u8, d: u8) u32 {
+        return @as(u32, a) | (@as(u32, b) << 8) | (@as(u32, c) << 16) | (@as(u32, d) << 24);
+    }
 };
 
-/// Contains most DRM_FORMAT_MOD* definitions from `<drm/drm_fourcc.h>`
-pub const DrmFormatMod = enum(u64) {
-    pub const generic_16_16_tile: DrmFormatMod = .samsung_16_16_tile;
+pub const FormatModifiers = packed struct(u64) {
+    raw: u56,
+    vendor: Vendor,
 
-    pub const vivante_ts_64_4: u64 = 1 << 48;
-    pub const vivante_ts_64_2: u64 = 2 << 48;
-    pub const vivante_ts_128_4: u64 = 3 << 48;
-    pub const vivante_ts_256_4: u64 = 4 << 48;
-    pub const vivante_ts_mask: u64 = 0xf << 48;
-    pub const vivante_comp_dec400: u64 = 1 << 52;
-    pub const vivante_comp_mask: u64 = 0xf << 52;
-    pub const vivante_ext_mask = vivante_ts_mask | vivante_comp_mask;
+    pub fn resolve(self: FormatModifiers) Resolved {
+        return switch (self.vendor) {
+            .none => .{ .none = .resolve(self.raw) },
+            .intel => .{ .intel = self.raw }, // TODO
+            .amd => .{ .amd = self.raw }, // TODO
+            .nvidia => .{ .nvidia = .resolve(self.raw) },
+            .samsung => .{ .samsung = self.raw }, // TODO
+            .qualcomm => .{ .qualcomm = self.raw }, // TODO
+            .vivante => .{ .vivante = self.raw }, // TODO
+            .broadcom => .{ .broadcom = self.raw }, // TODO
+            .arm => .{ .arm = self.raw }, // TODO
+            .allwinner => .{ .allwinner = self.raw }, // TODO
+            .amlogic => .{ .amlogic = self.raw }, // TODO
+            .mtk => .{ .mtk = self.raw }, // TODO
+            .apple => .{ .apple = self.raw }, // TODO
+        };
+    }
 
-    pub const afbc_block_size_mask: u4 = 0xf;
-    pub const afbc_block_size_16x16: u64 = 1;
-    pub const afbc_block_size_32x8: u64 = 2;
-    pub const afbc_block_size_64x4: u64 = 3;
-    pub const afbc_block_size_32x8_64x4: u64 = 4;
-    pub const afbc_ytr: u64 = 1 << 4;
-    pub const afbc_split: u64 = 1 << 5;
-    pub const afbc_sparse: u64 = 1 << 6;
-    pub const afbc_cbr: u64 = 1 << 7;
-    pub const afbc_tiled: u64 = 1 << 8;
-    pub const afbc_sc: u64 = 1 << 9;
-    pub const afbc_db: u64 = 1 << 10;
-    pub const afbc_bch: u64 = 1 << 11;
-    pub const afbc_usm: u64 = 1 << 12;
+    pub const Vendor = enum(u8) {
+        none = 0,
+        intel = 0x01,
+        amd = 0x02,
+        nvidia = 0x03,
+        samsung = 0x04,
+        qualcomm = 0x05,
+        vivante = 0x06,
+        broadcom = 0x07,
+        arm = 0x08,
+        allwinner = 0x09,
+        amlogic = 0x0a,
+        mtk = 0x0b,
+        apple = 0x0c,
+    };
 
-    pub const afrc_cu_size_mask: u4 = 0xf;
-    pub const afrc_cu_size_16: u64 = 1;
-    pub const afrc_cu_size_24: u64 = 2;
-    pub const afrc_cu_size_32: u64 = 3;
-    pub const afrc_layout_scan: u64 = 1 << 8;
+    pub const Resolved = union(Vendor) {
+        none: None,
+        intel: u56,
+        amd: u56,
+        nvidia: Nvidia,
+        samsung: u56,
+        qualcomm: u56,
+        vivante: u56,
+        broadcom: u56,
+        arm: u56,
+        allwinner: u56,
+        amlogic: u56,
+        mtk: u56,
+        apple: u56,
+    };
 
-    pub const amlogic_fbc_layout_basic: u64 = 1;
-    pub const amlogic_fbc_layout_scatter: u64 = 2;
-    pub const amlogic_fbc_option_mem_saving: u64 = 1 << 0;
+    pub const None = union(enum) {
+        invalid: void,
+        unknown: u56,
 
-    pub const amd_tile_ver_gfx9 = 1;
-    pub const amd_tile_ver_gfx10 = 2;
-    pub const amd_tile_ver_gfx10_rbplus = 3;
-    pub const amd_tile_ver_gfx11 = 4;
-    pub const amd_tile_ver_gfx12 = 5;
-    pub const amd_tile_gfx9_64k_s = 9;
-    pub const amd_tile_gfx9_64k_d = 10;
-    pub const amd_tile_gfx9_64k_s_x = 25;
-    pub const amd_tile_gfx9_64k_d_x = 26;
-    pub const amd_tile_gfx9_64k_r_x = 27;
-    pub const amd_tile_gfx11_256k_r_x = 31;
-    pub const amd_tile_gfx12_256b_2d = 1;
-    pub const amd_tile_gfx12_4k_2d = 2;
-    pub const amd_tile_gfx12_64k_2d = 3;
-    pub const amd_tile_gfx12_256k_2d = 4;
-    pub const amd_dcc_block_64b = 0;
-    pub const amd_dcc_block_128b = 1;
-    pub const amd_dcc_block_256b = 2;
-    pub const amd_tile_version_shift = 0;
-    pub const amd_tile_version_mask = 0xff;
-    pub const amd_tile_shift = 8;
-    pub const amd_tile_mask = 0x1f;
-    pub const amd_dcc_shift = 13;
-    pub const amd_dcc_mask = 0x1;
-    pub const amd_dcc_retile_shift = 14;
-    pub const amd_dcc_retile_mask = 0x1;
-    pub const amd_dcc_pipe_align_shift = 15;
-    pub const amd_dcc_pipe_align_mask = 0x1;
-    pub const amd_dcc_independent_64b_shift = 16;
-    pub const amd_dcc_independent_64b_mask = 0x1;
-    pub const amd_dcc_independent_128b_shift = 17;
-    pub const amd_dcc_independent_128b_mask = 0x1;
-    pub const amd_dcc_max_compressed_block_shift = 18;
-    pub const amd_dcc_max_compressed_block_mask = 0x3;
-    pub const amd_dcc_constant_encode_shift = 20;
-    pub const amd_dcc_constant_encode_mask = 0x1;
-    pub const amd_pipe_xor_bits_shift = 21;
-    pub const amd_pipe_xor_bits_mask = 0x7;
-    pub const amd_bank_xor_bits_shift = 24;
-    pub const amd_bank_xor_bits_mask = 0x7;
-    pub const amd_packers_shift = 27;
-    pub const amd_packers_mask = 0x7;
-    pub const amd_rb_shift = 30;
-    pub const amd_rb_mask = 0x7;
-    pub const amd_pipe_shift = 33;
-    pub const amd_pipe_mask = 0x7;
+        pub fn resolve(raw: u56) None {
+            return switch (raw) {
+                0xffffffffffffff => .invalid,
+                else => |val| .{ .unknown = val },
+            };
+        }
+    };
 
-    invalid = 0x00ffffffffffffff,
+    pub const Nvidia = union(enum) {
+        tegra_tiled: void,
+        block_linear_16bx2_1_gob: void,
+        block_linear_16bx2_2_gob: void,
+        block_linear_16bx2_4_gob: void,
+        block_linear_16bx2_8_gob: void,
+        block_linear_16bx2_16_gob: void,
+        block_linear_16bx2_32_gob: void,
+        block_linear_2d: BlockLinear2D,
 
-    linear = fourccModCode(.none, 0),
+        pub fn resolve(raw: u56) Nvidia {
+            return switch (raw) {
+                1 => .tegra_tiled,
+                bl2dCode(0) => .block_linear_16bx2_1_gob,
+                bl2dCode(1) => .block_linear_16bx2_2_gob,
+                bl2dCode(2) => .block_linear_16bx2_4_gob,
+                bl2dCode(3) => .block_linear_16bx2_8_gob,
+                bl2dCode(4) => .block_linear_16bx2_16_gob,
+                bl2dCode(5) => .block_linear_16bx2_32_gob,
+                else => |val| .{ .block_linear_2d = .fromRaw(val) },
+            };
+        }
 
-    intel_x_tiled = fourccModCode(.intel, 1),
-    intel_y_tiled = fourccModCode(.intel, 2),
-    intel_yf_tiled = fourccModCode(.intel, 3),
-    intel_y_tiled_ccs = fourccModCode(.intel, 4),
-    intel_yf_tiled_ccs = fourccModCode(.intel, 5),
-    intel_y_tiled_gen12_rc_css = fourccModCode(.intel, 6),
-    intel_y_tiled_gen12_mc_css = fourccModCode(.intel, 7),
-    intel_y_tiled_gen12_rc_css_cc = fourccModCode(.intel, 8),
-    intel_4_tiled = fourccModCode(.intel, 9),
-    intel_4_tiled_dg2_rc_ccs = fourccModCode(.intel, 10),
-    intel_4_tiled_dg2_mc_ccs = fourccModCode(.intel, 11),
-    intel_4_tiled_dg2_rc_ccs_cc = fourccModCode(.intel, 12),
-    intel_4_tiled_mtl_rc_ccs = fourccModCode(.intel, 13),
-    intel_4_tiled_mtl_mc_ccs = fourccModCode(.intel, 14),
-    intel_4_tiled_mtl_rc_ccs_cc = fourccModCode(.intel, 15),
-    intel_4_tiled_lnl_ccs = fourccModCode(.intel, 16),
-    intel_4_tiled_bmg_ccs = fourccModCode(.intel, 17),
+        pub const BlockLinear2D = struct {
+            height: u16,
+            page_kind: u8,
+            gob_height: GobHeight,
+            page_kind_generation: PageKindGeneration,
+            sector_layout: SectorLayout,
+            compression_type: CompressionType,
 
-    samsung_64_32_tile = fourccModCode(.samsung, 1),
-    samsung_16_16_tile = fourccModCode(.samsung, 2),
+            fn fromRaw(raw: u56) BlockLinear2D {
+                const h: u4 = @intCast(raw & 0xf);
+                const k: u8 = @intCast((raw >> 12) & 0xff);
+                const g: u2 = @intCast((raw >> 20) & 0x3);
+                const s: u1 = @intCast((raw >> 22) & 0x1);
+                const c: u3 = @intCast((raw >> 23) & 0x7);
 
-    qualcomm_compressed = fourccModCode(.qualcomm, 1),
-    qualcomm_tiled2 = fourccModCode(.qualcomm, 2),
-    qualcomm_tiled3 = fourccModCode(.qualcomm, 3),
+                const height: u16 = @as(u16, 1) << h;
+                const page_kind: u8 = k;
+                const gob_height: GobHeight = switch (g) {
+                    1 => .@"4",
+                    0, 2 => .@"8",
+                    else => unreachable,
+                };
+                const page_kind_generation: PageKindGeneration = @enumFromInt(g);
+                const sector_layout: SectorLayout = @enumFromInt(s);
+                const compression_type: CompressionType = @enumFromInt(c);
 
-    vivante_tiled = fourccModCode(.vivante, 1),
-    vivante_super_tiled = fourccModCode(.vivante, 2),
-    vivante_split_tiled = fourccModCode(.vivante, 3),
-    vivante_split_super_tiled = fourccModCode(.vivante, 4),
+                return BlockLinear2D{
+                    .height = height,
+                    .page_kind = page_kind,
+                    .gob_height = gob_height,
+                    .page_kind_generation = page_kind_generation,
+                    .sector_layout = sector_layout,
+                    .compression_type = compression_type,
+                };
+            }
 
-    nvidia_tegra_tiled = fourccModCode(.nvidia, 1),
-    nvidia_16bx2_block_1_gob = nvidia16Bx2Block(0),
-    nvidia_16bx2_block_2_gob = nvidia16Bx2Block(1),
-    nvidia_16bx2_block_4_gob = nvidia16Bx2Block(2),
-    nvidia_16bx2_block_8_gob = nvidia16Bx2Block(3),
-    nvidia_16bx2_block_16_gob = nvidia16Bx2Block(4),
-    nvidia_16bx2_block_32_gob = nvidia16Bx2Block(5),
+            pub const GobHeight = enum {
+                @"4",
+                @"8",
+                reserved,
+            };
 
-    broadcom_vc4_t_tiled = fourccModCode(.broadcom, 1),
-    broadcom_sand32 = fourccModCode(.broadcom, 2),
-    broadcom_sand64 = fourccModCode(.broadcom, 3),
-    broadcom_sand128 = fourccModCode(.broadcom, 4),
-    broadcom_sand256 = fourccModCode(.broadcom, 5),
-    broadcom_uif = fourccModCode(.broadcom, 6),
+            pub const PageKindGeneration = enum {
+                @"Fermi - Volta, Tegra K1+",
+                @"G80 - GT2XX",
+                @"Turing+",
+            };
 
-    arm_16x16_block_u_interleaved = armModCode(.misc, 1),
+            pub const SectorLayout = enum {
+                @"Tegra K1 - Tegra Parker/TX2",
+                @"Desktop GPU and Tegra Xavier+",
+            };
 
-    allwinner_tiled = fourccModCode(.allwinner, 1),
+            pub const CompressionType = enum {
+                none,
+                @"ROP/3D, layout 1",
+                @"ROP/3D, layout 2",
+                @"CDE horizontal",
+                @"CDE vertical",
+            };
+        };
 
-    _, // This enum definately isn't complete so we'll leave it non-exhaustive for now
+        fn bl2dCode(h: u4) u56 {
+            return @as(u56, h) | 0x10;
+        }
+    };
 };
-
-const Vendor = enum(u8) {
-    none = 0,
-    intel = 0x01,
-    amd = 0x02,
-    nvidia = 0x03,
-    samsung = 0x04,
-    qualcomm = 0x05,
-    vivante = 0x06,
-    broadcom = 0x07,
-    arm = 0x08,
-    allwinner = 0x09,
-    amlogic = 0x0a,
-    mtk = 0x0b,
-    apple = 0x0c,
-};
-
-fn fourccCode(a: u8, b: u8, c: u8, d: u8) u32 {
-    return @as(u32, a) | (@as(u32, b) << 8) | (@as(u32, c) << 16) | (@as(u32, d) << 24);
-}
-
-fn fourccModCode(vendor: Vendor, value: u56) u64 {
-    return (@as(u64, @intFromEnum(vendor)) << 56) | (value & 0x00ffffffffffffff);
-}
-
-fn nvidiaBlockLinear2d(c: u3, s: u1, g: u2, k: u8, h: u4) u64 {
-    return fourccModCode(.nvidia, @as(u56, 0x10) |
-        @as(u56, h & 0xf) |
-        (@as(u56, k & 0xff) << 12) |
-        (@as(u56, g & 0x3) << 20) |
-        (@as(u56, s & 0x1) << 22) |
-        (@as(u56, c) & 0x7) << 23);
-}
-
-fn nvidia16Bx2Block(v: u4) u64 {
-    return nvidiaBlockLinear2d(0, 0, 0, 0, v);
-}
-
-const ArmModType = enum(u4) {
-    afbc = 0,
-    misc = 1,
-    afrc = 2,
-};
-
-fn armModCode(_type: ArmModType, val: u52) u64 {
-    return fourccModCode(.arm, (@as(u64, @intFromEnum(_type)) << 52) | (val & 0x000fffffffffffff));
-}
-
-test {
-    @import("std").testing.refAllDecls(@This());
-}
