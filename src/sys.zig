@@ -322,10 +322,39 @@ pub const mode = struct {
         vtotal: u16,
         vscan: u16,
         vrefresh: u32,
-        flags: u32,
-        type: u32,
+        flags: Flags,
+        type: Type,
 
         name: [display_mode_len]u8,
+
+        pub const Flags = packed struct(u32) {
+            phsync: bool = false,
+            nhsync: bool = false,
+            pvsync: bool = false,
+            nvsync: bool = false,
+            interlace: bool = false,
+            dblscan: bool = false,
+            csync: bool = false,
+            pcsync: bool = false,
+            ncsync: bool = false,
+            hskew: bool = false,
+            _deprecated10: u1 = 0,
+            _deprecated11: u1 = 0,
+            dblclk: bool = false,
+            clkdiv2: bool = false,
+            _: u18 = 0,
+        };
+
+        pub const Type = packed struct(u32) {
+            _deprecated0: u1 = 0,
+            _deprecated1: u1 = 0,
+            _deprecated2: u1 = 0,
+            preferred: bool = false,
+            _deprecated4: u1 = 0,
+            userdef: bool = false,
+            driver: bool = false,
+            _: u25 = 0,
+        };
     };
 
     pub const Cursor = extern struct {
@@ -340,10 +369,22 @@ pub const mode = struct {
 
     pub const GetEncoder = extern struct {
         encoder_id: u32,
-        encoder_type: u32,
+        encoder_type: Type,
         crtc_id: u32,
         possible_crtcs: u32,
         possible_clones: u32,
+
+        pub const Type = enum(u32) {
+            none = 0,
+            dac = 1,
+            tmds = 2,
+            lvds = 3,
+            tvdac = 4,
+            virtual = 5,
+            dsi = 6,
+            dpmst = 7,
+            dpi = 8,
+        };
     };
 
     pub const GetConnector = extern struct {

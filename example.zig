@@ -5,34 +5,44 @@ pub fn main(init: std.process.Init) !void {
     const io = init.io;
     const gpa = init.gpa;
 
-    const card = try drm.Card.openAuto(io);
+    const card = try drm.mode.Card.openAuto(io);
     defer card.close(io);
+    const res = try card.getResourcesAlloc(gpa);
+    defer res.deinit(gpa);
 
-    std.log.info("Using drm.Card.getModeAlloc...", .{});
-    const mode_res_1 = try card.getModeAlloc(gpa);
-    defer mode_res_1.deinit(gpa);
+    const connector = try chooseConnector(card, gpa, res.connectors);
+    defer connector.deinit(gpa);
+    std.log.info("Selected connector {}.", .{connector.id});
 
-    std.log.info("Min dimensions: {d}x{d}.", .{ mode_res_1.min_width, mode_res_1.min_height });
-    std.log.info("Max dimensions: {d}x{d}.", .{ mode_res_1.max_width, mode_res_1.max_height });
+    const mode = chooseMode(connector.modes);
+    std.log.info("Selected mode {}x{}@{}.", .{ mode.hdisplay, mode.vdisplay, mode.vrefresh });
 
-    std.log.info("Got {d} fbs: {any}.", .{ mode_res_1.fbs.len, mode_res_1.fbs });
-    std.log.info("Got {d} crtcs: {any}.", .{ mode_res_1.crtcs.len, mode_res_1.crtcs });
-    std.log.info("Got {d} connectors: {any}.", .{ mode_res_1.connectors.len, mode_res_1.connectors });
-    std.log.info("Got {d} encoders: {any}.", .{ mode_res_1.encoders.len, mode_res_1.encoders });
+    const encoder = try card.getEncoder(connector.encoder_id);
+    std.log.info("Selected encoder {} (type: {t}).", .{ encoder.id, encoder.type });
 
-    var fb_buf: [16]u32 = undefined;
-    var crtc_buf: [16]u32 = undefined;
-    var connector_buf: [16]u32 = undefined;
-    var encoder_buf: [16]u32 = undefined;
+    const crtc = try card.getCrtc(encoder.crtc_id);
+    std.log.info("Selected crtc {} (mode valid: {}).", .{ crtc.id, crtc.mode != null });
+}
 
-    std.log.info("Using drm.Card.getModeBuffered...", .{});
-    const mode_res_2 = try card.getModeBuffered(&fb_buf, &crtc_buf, &connector_buf, &encoder_buf);
+fn chooseConnector(
+    card: drm.mode.Card,
+    gpa: std.mem.Allocator,
+    connectors: []const u32,
+) !drm.mode.Connector {
+    for (connectors) |id| {
+        const connector = try card.getConnectorAlloc(gpa, id);
+        if (connector.connection == .connected) return connector;
+        connector.deinit(gpa);
+    }
+    return error.NoConnectedConnectors;
+}
 
-    std.log.info("Min dimensions: {d}x{d}.", .{ mode_res_2.min_width, mode_res_2.min_height });
-    std.log.info("Max dimensions: {d}x{d}.", .{ mode_res_2.max_width, mode_res_2.max_height });
-
-    std.log.info("Got {d} fbs: {any}.", .{ mode_res_2.fbs.len, mode_res_2.fbs });
-    std.log.info("Got {d} crtcs: {any}.", .{ mode_res_2.crtcs.len, mode_res_2.crtcs });
-    std.log.info("Got {d} connectors: {any}.", .{ mode_res_2.connectors.len, mode_res_2.connectors });
-    std.log.info("Got {d} encoders: {any}.", .{ mode_res_2.encoders.len, mode_res_2.encoders });
+fn chooseMode(modes: []const drm.sys.mode.Modeinfo) drm.sys.mode.Modeinfo {
+    var best = modes[0];
+    const best_score = @as(u64, best.hdisplay) * @as(u64, best.vdisplay) * @as(u64, best.vrefresh);
+    for (modes) |mode| {
+        const score = @as(u64, mode.hdisplay) * @as(u64, mode.vdisplay) * @as(u64, mode.vrefresh);
+        if (score > best_score) best = mode;
+    }
+    return best;
 }
