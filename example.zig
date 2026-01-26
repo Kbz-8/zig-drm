@@ -37,7 +37,7 @@ fn chooseConnector(
     return error.NoConnectedConnectors;
 }
 
-fn chooseMode(modes: []const drm.sys.mode.Modeinfo) drm.sys.mode.Modeinfo {
+fn chooseMode(modes: []const drm.sys.mode.ModeInfo) drm.sys.mode.ModeInfo {
     var best = modes[0];
     const best_score = @as(u64, best.hdisplay) * @as(u64, best.vdisplay) * @as(u64, best.vrefresh);
     for (modes) |mode| {

@@ -83,8 +83,8 @@ pub const Request = enum(u32) {
     mode_getcrtc = drm_iowr(0xA1, mode.Crtc),
     mode_setcrtc = drm_iowr(0xA2, mode.Crtc),
     mode_cursor = drm_iowr(0xA3, mode.Cursor),
-    mode_getgamma = drm_iowr(0xA4, mode.Crtc.Lut),
-    mode_setgamma = drm_iowr(0xA5, mode.Crtc.Lut),
+    mode_getgamma = drm_iowr(0xA4, mode.CrtcLut),
+    mode_setgamma = drm_iowr(0xA5, mode.CrtcLut),
     mode_getencoder = drm_iowr(0xA6, mode.GetEncoder),
     mode_getconnector = drm_iowr(0xA7, mode.GetConnector),
     mode_getproperty = drm_iowr(0xAA, mode.GetProperty),
@@ -183,31 +183,31 @@ pub const IrqBusid = extern struct {
 pub const Map = extern struct {
     offset: c_ulong,
     size: c_ulong,
-    type: Type,
-    flags: Flags,
+    type: MapType,
+    flags: MapFlags,
     handle: *anyopaque,
     mtrr: c_int,
+};
 
-    pub const Type = enum(c_int) {
-        frame_buffer = 0,
-        registers = 1,
-        shm = 2,
-        agp = 3,
-        scatter_gather = 4,
-        consistent = 5,
-    };
+pub const MapType = enum(c_int) {
+    frame_buffer = 0,
+    registers = 1,
+    shm = 2,
+    agp = 3,
+    scatter_gather = 4,
+    consistent = 5,
+};
 
-    pub const Flags = packed struct(c_int) {
-        restricted: bool = false,
-        read_only: bool = false,
-        locked: bool = false,
-        kernel: bool = false,
-        write_combining: bool = false,
-        contains_lock: bool = false,
-        removable: bool = false,
-        driver: bool = false,
-        _: @Int(.signed, @bitSizeOf(c_int) - 8) = 0,
-    };
+pub const MapFlags = packed struct(c_int) {
+    restricted: bool = false,
+    read_only: bool = false,
+    locked: bool = false,
+    kernel: bool = false,
+    write_combining: bool = false,
+    contains_lock: bool = false,
+    removable: bool = false,
+    driver: bool = false,
+    _: @Int(.signed, @bitSizeOf(c_int) - 8) = 0,
 };
 
 pub const Client = extern struct {
@@ -222,29 +222,29 @@ pub const Client = extern struct {
 pub const Stats = extern struct {
     count: c_ulong,
     data: [15]Stat,
+};
 
-    pub const Stat = extern struct {
-        value: c_ulong,
-        type: Type,
+pub const Stat = extern struct {
+    value: c_ulong,
+    type: StatType,
+};
 
-        pub const Type = enum(c_int) {
-            lock,
-            opens,
-            closes,
-            ioctls,
-            locks,
-            unlocks,
-            value,
-            byte,
-            count,
-            irq,
-            primary,
-            secondary,
-            dma,
-            special,
-            missed,
-        };
-    };
+pub const StatType = enum(c_int) {
+    lock,
+    opens,
+    closes,
+    ioctls,
+    locks,
+    unlocks,
+    value,
+    byte,
+    count,
+    irq,
+    primary,
+    secondary,
+    dma,
+    special,
+    missed,
 };
 
 pub const SetVersion = extern struct {
@@ -256,18 +256,45 @@ pub const SetVersion = extern struct {
 
 pub const Ctx = extern struct {
     handle: Context,
-    flags: Flags,
+    flags: CtxFlags,
+};
 
-    pub const Flags = packed struct(c_int) {
-        preserved: bool = false,
-        @"2d_only": bool = false,
-        _: @Int(.signed, @bitSizeOf(c_int) - 2) = 0,
-    };
+pub const CtxFlags = packed struct(c_int) {
+    preserved: bool = false,
+    @"2d_only": bool = false,
+    _: @Int(.signed, @bitSizeOf(c_int) - 2) = 0,
 };
 
 pub const CtxRes = extern struct {
     count: c_int,
     contexts: [*]Ctx,
+};
+
+pub const Event = extern struct {
+    type: EventType,
+    length: u32,
+};
+
+pub const EventType = enum(u32) {
+    vblank = 0x01,
+    flip_complete = 0x02,
+    crtc_sequence = 0x03,
+};
+
+pub const EventVblank = extern struct {
+    base: Event,
+    user_data: u64,
+    tv_sec: u32,
+    tv_usec: u32,
+    sequence: u32,
+    crtc_id: u32,
+};
+
+pub const EventCrtcSequence = extern struct {
+    base: Event,
+    user_data: u64,
+    time_ns: i64,
+    sequence: u64,
 };
 
 pub const mode = struct {
@@ -298,18 +325,18 @@ pub const mode = struct {
         y: u32,
         gamma_size: u32,
         mode_valid: u32,
-        mode: Modeinfo,
-
-        pub const Lut = extern struct {
-            crtc_id: u32,
-            gamma_size: u32,
-            red: u64,
-            green: u64,
-            blue: u64,
-        };
+        mode: ModeInfo,
     };
 
-    pub const Modeinfo = extern struct {
+    pub const CrtcLut = extern struct {
+        crtc_id: u32,
+        gamma_size: u32,
+        red: u64,
+        green: u64,
+        blue: u64,
+    };
+
+    pub const ModeInfo = extern struct {
         clock: u32,
         hdisplay: u16,
         hsync_start: u16,
@@ -322,39 +349,39 @@ pub const mode = struct {
         vtotal: u16,
         vscan: u16,
         vrefresh: u32,
-        flags: Flags,
-        type: Type,
+        flags: ModeFlags,
+        type: ModeType,
 
         name: [display_mode_len]u8,
+    };
 
-        pub const Flags = packed struct(u32) {
-            phsync: bool = false,
-            nhsync: bool = false,
-            pvsync: bool = false,
-            nvsync: bool = false,
-            interlace: bool = false,
-            dblscan: bool = false,
-            csync: bool = false,
-            pcsync: bool = false,
-            ncsync: bool = false,
-            hskew: bool = false,
-            _deprecated10: u1 = 0,
-            _deprecated11: u1 = 0,
-            dblclk: bool = false,
-            clkdiv2: bool = false,
-            _: u18 = 0,
-        };
+    pub const ModeType = packed struct(u32) {
+        _deprecated0: u1 = 0,
+        _deprecated1: u1 = 0,
+        _deprecated2: u1 = 0,
+        preferred: bool = false,
+        _deprecated4: u1 = 0,
+        userdef: bool = false,
+        driver: bool = false,
+        _: u25 = 0,
+    };
 
-        pub const Type = packed struct(u32) {
-            _deprecated0: u1 = 0,
-            _deprecated1: u1 = 0,
-            _deprecated2: u1 = 0,
-            preferred: bool = false,
-            _deprecated4: u1 = 0,
-            userdef: bool = false,
-            driver: bool = false,
-            _: u25 = 0,
-        };
+    pub const ModeFlags = packed struct(u32) {
+        phsync: bool = false,
+        nhsync: bool = false,
+        pvsync: bool = false,
+        nvsync: bool = false,
+        interlace: bool = false,
+        dblscan: bool = false,
+        csync: bool = false,
+        pcsync: bool = false,
+        ncsync: bool = false,
+        hskew: bool = false,
+        _deprecated10: u1 = 0,
+        _deprecated11: u1 = 0,
+        dblclk: bool = false,
+        clkdiv2: bool = false,
+        _: u18 = 0,
     };
 
     pub const Cursor = extern struct {
@@ -369,22 +396,22 @@ pub const mode = struct {
 
     pub const GetEncoder = extern struct {
         encoder_id: u32,
-        encoder_type: Type,
+        encoder_type: EncoderType,
         crtc_id: u32,
         possible_crtcs: u32,
         possible_clones: u32,
+    };
 
-        pub const Type = enum(u32) {
-            none = 0,
-            dac = 1,
-            tmds = 2,
-            lvds = 3,
-            tvdac = 4,
-            virtual = 5,
-            dsi = 6,
-            dpmst = 7,
-            dpi = 8,
-        };
+    pub const EncoderType = enum(u32) {
+        none = 0,
+        dac = 1,
+        tmds = 2,
+        lvds = 3,
+        tvdac = 4,
+        virtual = 5,
+        dsi = 6,
+        dpmst = 7,
+        dpi = 8,
     };
 
     pub const GetConnector = extern struct {
@@ -397,13 +424,37 @@ pub const mode = struct {
         count_encoders: u32,
         encoder_id: u32,
         connector_id: u32,
-        connector_type: u32,
+        connector_type: ConnectorType,
         connector_type_id: u32,
         connection: u32,
         mm_width: u32,
         mm_height: u32,
         subpixel: u32,
         pad: u32,
+    };
+
+    pub const ConnectorType = enum(u32) {
+        unknown = 0,
+        vga = 1,
+        dvi_i = 2,
+        dvi_d = 3,
+        dvi_a = 4,
+        composite = 5,
+        svideo = 6,
+        lvds = 7,
+        component = 8,
+        din = 9,
+        display_port = 10,
+        hdmi_a = 11,
+        hdmi_b = 12,
+        tv = 13,
+        e_dp = 14,
+        virtual = 15,
+        dsi = 16,
+        dpi = 17,
+        writeback = 18,
+        spi = 19,
+        usb = 20,
     };
 
     pub const GetProperty = extern struct {
@@ -441,9 +492,17 @@ pub const mode = struct {
     pub const CrtcPageFlip = extern struct {
         crtc_id: u32,
         fb_id: u32,
-        flags: u32,
+        flags: PageFlipFlags,
         reserved: u32,
         user_data: u64,
+    };
+
+    pub const PageFlipFlags = packed struct(u32) {
+        event: bool = false,
+        async: bool = false,
+        target_absolute: bool = false,
+        target_relative: bool = false,
+        _: u28 = 0,
     };
 
     pub const FbDirtyCmd = extern struct {
@@ -513,7 +572,7 @@ pub const mode = struct {
         handles: [4]u32,
         pitches: [4]u32,
         offsets: [4]u32,
-        modifier: [4]u64,
+        modifiers: [4]u64,
     };
 
     pub const ObjGetProperties = extern struct {

@@ -14,7 +14,7 @@ pub const Card = struct {
 
     pub fn open(io: std.Io, path: []const u8) OpenError!Card {
         if (std.fs.path.isAbsolute(path))
-            return std.Io.Dir.openFileAbsolute(io, path, .{ .mode = .read_write });
+            return Card{ .handle = try std.Io.Dir.openFileAbsolute(io, path, .{ .mode = .read_write }) };
 
         const dir = try std.Io.Dir.openDirAbsolute(io, "/dev/dri", .{});
         defer dir.close(io);
@@ -42,4 +42,77 @@ pub const Card = struct {
     pub inline fn modeHandle(self: Card) mode.Card {
         return .{ .handle = self.handle };
     }
+
+    pub fn handleEvents(
+        self: Card,
+        io: std.Io,
+        callback: fn (Card, Event, anytype) anyerror!void,
+        args: anytype,
+    ) anyerror!void {
+        var buf: [4096]u8 = undefined;
+        const read = try self.handle.readStreaming(io, &.{&buf});
+        if (read == 0) return error.EndOfStream;
+
+        var offset: usize = 0;
+        while (offset < read) {
+            if (read - offset < @sizeOf(sys.Event)) return error.IncompleteEvent;
+
+            const ev: *align(1) const sys.Event = std.mem.bytesAsValue(
+                sys.Event,
+                buf[offset..][0..@sizeOf(sys.Event)],
+            );
+
+            offset += ev.length;
+
+            const event = Event.parse(ev);
+            try callback(self, event, args);
+        }
+    }
 };
+
+pub const Event = union(enum) {
+    vblank: Vblank,
+    flip_complete: Vblank,
+    crtc_sequence: CrtcSequence,
+
+    pub fn parse(event: *align(1) const sys.Event) Event {
+        return switch (event.type) {
+            inline .vblank, .flip_complete => |tag| @unionInit(Event, @tagName(tag), ev: {
+                const vblank: *align(1) const sys.EventVblank = @ptrCast(@alignCast(event));
+                break :ev .{
+                    .user_data = @ptrFromInt(vblank.user_data),
+                    .sec = vblank.tv_sec,
+                    .usec = vblank.tv_usec,
+                    .sequence = vblank.sequence,
+                    .crtc_id = vblank.crtc_id,
+                };
+            }),
+            .crtc_sequence => Event{ .crtc_sequence = ev: {
+                const crtc_sequence: *align(1) const sys.EventCrtcSequence = @ptrCast(@alignCast(event));
+                break :ev .{
+                    .user_data = @ptrFromInt(crtc_sequence.user_data),
+                    .ns = crtc_sequence.time_ns,
+                    .sequence = crtc_sequence.sequence,
+                };
+            } },
+        };
+    }
+
+    pub const Vblank = struct {
+        user_data: *anyopaque,
+        sec: u32,
+        usec: u32,
+        sequence: u32,
+        crtc_id: u32,
+    };
+
+    pub const CrtcSequence = struct {
+        user_data: *anyopaque,
+        ns: i64,
+        sequence: u64,
+    };
+};
+
+test {
+    std.testing.refAllDeclsRecursive(@This());
+}

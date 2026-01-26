@@ -1,6 +1,7 @@
 const std = @import("std");
 const sys = @import("sys.zig");
 const base = @import("drm.zig");
+const fmt = @import("format.zig");
 const Allocator = std.mem.Allocator;
 
 pub const Card = struct {
@@ -10,7 +11,7 @@ pub const Card = struct {
 
     pub fn open(io: std.Io, path: []const u8) OpenError!Card {
         if (std.fs.path.isAbsolute(path))
-            return std.Io.Dir.openFileAbsolute(io, path, .{ .mode = .read_write });
+            return Card{ .handle = try std.Io.Dir.openFileAbsolute(io, path, .{ .mode = .read_write }) };
 
         const dir = try std.Io.Dir.openDirAbsolute(io, "/dev/dri", .{});
         defer dir.close(io);
@@ -144,7 +145,7 @@ pub const Card = struct {
             const encoders = try gpa.alloc(u32, get_conn.count_encoders);
             errdefer gpa.free(encoders);
 
-            const modes = try gpa.alloc(sys.mode.Modeinfo, get_conn.count_modes);
+            const modes = try gpa.alloc(sys.mode.ModeInfo, get_conn.count_modes);
             errdefer gpa.free(modes);
 
             const props = try gpa.alloc(u32, get_conn.count_props);
@@ -183,14 +184,16 @@ pub const Card = struct {
                 .prop_values = prop_values[0..get_conn.count_props],
                 .mm_width = get_conn.mm_width,
                 .mm_height = get_conn.mm_height,
+                .type = get_conn.connector_type,
+                .type_id = get_conn.connector_type_id,
             };
         }
     }
 
-    pub inline fn getConnectorBuffered(
+    pub fn getConnectorBuffered(
         self: Card,
         encoders: []u32,
-        modes: []sys.mode.Modeinfo,
+        modes: []sys.mode.ModeInfo,
         props: []u32,
         prop_values: []u64,
         id: u32,
@@ -224,12 +227,12 @@ pub const Card = struct {
             .prop_values = prop_values[0..get_conn.count_props],
             .mm_width = get_conn.mm_width,
             .mm_height = get_conn.mm_height,
+            .type = get_conn.connector_type,
+            .type_id = get_conn.connector_type_id,
         };
     }
 
-    pub const GetEncoderError = sys.IoctlError;
-
-    pub fn getEncoder(self: Card, id: u32) GetEncoderError!Encoder {
+    pub fn getEncoder(self: Card, id: u32) sys.IoctlError!Encoder {
         var get_encoder = std.mem.zeroInit(sys.mode.GetEncoder, .{ .encoder_id = id });
         try sys.ioctl(self.handle.handle, .mode_getencoder, &get_encoder);
 
@@ -256,6 +259,102 @@ pub const Card = struct {
             .gamma_size = crtc.gamma_size,
             .mode = if (crtc.mode_valid != 0) crtc.mode else null,
         };
+    }
+
+    pub fn setCrtc(
+        self: Card,
+        id: u32,
+        fb_id: u32,
+        x: u32,
+        y: u32,
+        connectors: []u32,
+        mode: ?sys.mode.ModeInfo,
+    ) sys.IoctlError!void {
+        var crtc = std.mem.zeroInit(sys.mode.Crtc, .{
+            .crtc_id = id,
+            .fb_id = fb_id,
+            .x = x,
+            .y = y,
+            .count_connectors = @as(u32, @intCast(connectors.len)),
+            .set_connectors_ptr = @intFromPtr(connectors.ptr),
+        });
+        if (mode) |m| {
+            crtc.mode_valid = 1;
+            crtc.mode = m;
+        }
+        try sys.ioctl(self.handle.handle, .mode_setcrtc, &crtc);
+    }
+
+    pub fn createDumbBuffer(self: Card, width: u32, height: u32, bpp: u32) sys.IoctlError!DumbBuffer {
+        var create = std.mem.zeroInit(sys.mode.CreateDumb, .{
+            .width = width,
+            .height = height,
+            .bpp = bpp,
+        });
+        try sys.ioctl(self.handle.handle, .mode_create_dumb, &create);
+
+        return DumbBuffer{
+            .handle = create.handle,
+            .width = create.width,
+            .height = create.height,
+            .stride = create.pitch,
+            .size = @intCast(create.size),
+        };
+    }
+
+    pub fn destroyDumbBuffer(self: Card, handle: u32) sys.IoctlError!void {
+        var destroy = sys.mode.DestroyDumb{ .handle = handle };
+        try sys.ioctl(self.handle.handle, .mode_destroy_dumb, &destroy);
+    }
+
+    pub fn mapDumbBuffer(self: Card, dumb: DumbBuffer, offset: usize) sys.IoctlError!usize {
+        var map = sys.mode.MapDumb{ .handle = dumb.handle, .pad = 0, .offset = offset };
+        try sys.ioctl(self.handle.handle, .mode_map_dumb, &map);
+        return @intCast(map.offset);
+    }
+
+    pub fn addFb2(
+        self: Card,
+        width: u32,
+        height: u32,
+        format: fmt.Format,
+        handles: [4]u32,
+        pitches: [4]u32,
+        offsets: [4]u32,
+        flags: u32, // FIXME: add flags type
+    ) sys.IoctlError!u32 {
+        var cmd = std.mem.zeroInit(sys.mode.FbCmd2, .{
+            .width = width,
+            .height = height,
+            .pixel_format = @intFromEnum(format),
+            .handles = handles,
+            .pitches = pitches,
+            .offsets = offsets,
+            .flags = flags,
+        });
+        try sys.ioctl(self.handle.handle, .mode_addfb2, &cmd);
+        return cmd.fb_id;
+    }
+
+    pub fn removeFb(self: Card, fb: u32) sys.IoctlError!void {
+        try sys.ioctl(self.handle.handle, .mode_rmfb, &fb);
+    }
+
+    pub fn pageFlip(
+        self: Card,
+        crtc_id: u32,
+        fb_id: u32,
+        flags: sys.mode.PageFlipFlags,
+        data: ?*anyopaque,
+    ) sys.IoctlError!void {
+        var flip = sys.mode.CrtcPageFlip{
+            .crtc_id = crtc_id,
+            .fb_id = fb_id,
+            .flags = flags,
+            .reserved = 0,
+            .user_data = @intFromPtr(data),
+        };
+        try sys.ioctl(self.handle.handle, .mode_page_flip, &flip);
     }
 };
 
@@ -300,9 +399,11 @@ pub const Connector = struct {
     mm_height: u32,
     subpixel: Subpixel,
     encoders: []const u32,
-    modes: []const sys.mode.Modeinfo,
+    modes: []const sys.mode.ModeInfo,
     props: []const u32,
     prop_values: []const u64,
+    type: sys.mode.ConnectorType,
+    type_id: u32,
 
     pub fn deinit(self: Connector, gpa: Allocator) void {
         gpa.free(self.prop_values);
@@ -314,7 +415,7 @@ pub const Connector = struct {
 
 pub const Encoder = struct {
     id: u32,
-    type: sys.mode.GetEncoder.Type,
+    type: sys.mode.EncoderType,
     crtc_id: u32,
     possible_crtcs: u32,
     possible_clones: u32,
@@ -326,5 +427,13 @@ pub const Crtc = struct {
     x: u32,
     y: u32,
     gamma_size: u32,
-    mode: ?sys.mode.Modeinfo,
+    mode: ?sys.mode.ModeInfo,
+};
+
+pub const DumbBuffer = struct {
+    handle: u32,
+    width: u32,
+    height: u32,
+    stride: u32,
+    size: usize,
 };
