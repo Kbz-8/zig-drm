@@ -5,9 +5,9 @@ pub fn main(init: std.process.Init) !void {
     const io = init.io;
     const gpa = init.gpa;
 
-    const card = try drm.mode.Card.openAuto(io);
+    const card = try drm.Card.openAuto(io);
     defer card.close(io);
-    const res = try card.getResourcesAlloc(gpa);
+    const res = try card.getModesettingResourcesAlloc(gpa);
     defer res.deinit(gpa);
 
     const connector = try chooseConnector(card, gpa, res.connectors);
@@ -25,10 +25,10 @@ pub fn main(init: std.process.Init) !void {
 }
 
 fn chooseConnector(
-    card: drm.mode.Card,
+    card: drm.Card,
     gpa: std.mem.Allocator,
     connectors: []const u32,
-) !drm.mode.Connector {
+) !drm.Connector {
     for (connectors) |id| {
         const connector = try card.getConnectorAlloc(gpa, id);
         if (connector.connection == .connected) return connector;
