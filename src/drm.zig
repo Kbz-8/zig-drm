@@ -64,6 +64,8 @@ pub const Card = struct {
         }
     }
 
+    // BEGIN MODESETTING API
+
     pub const GetResourcesError = sys.IoctlError || error{OutOfMemory};
 
     pub fn getModesettingResourcesAlloc(self: Card, gpa: std.mem.Allocator) GetResourcesError!ModesettingResources {
@@ -382,6 +384,49 @@ pub const Card = struct {
     }
 };
 
+pub const Event = union(enum) {
+    vblank: Vblank,
+    flip_complete: Vblank,
+    crtc_sequence: CrtcSequence,
+
+    pub fn parse(event: *align(1) const sys.Event) Event {
+        return switch (event.type) {
+            inline .vblank, .flip_complete => |tag| @unionInit(Event, @tagName(tag), ev: {
+                const vblank: *align(1) const sys.EventVblank = @ptrCast(@alignCast(event));
+                break :ev .{
+                    .user_data = @ptrFromInt(vblank.user_data),
+                    .sec = vblank.tv_sec,
+                    .usec = vblank.tv_usec,
+                    .sequence = vblank.sequence,
+                    .crtc_id = vblank.crtc_id,
+                };
+            }),
+            .crtc_sequence => Event{ .crtc_sequence = ev: {
+                const crtc_sequence: *align(1) const sys.EventCrtcSequence = @ptrCast(@alignCast(event));
+                break :ev .{
+                    .user_data = @ptrFromInt(crtc_sequence.user_data),
+                    .ns = crtc_sequence.time_ns,
+                    .sequence = crtc_sequence.sequence,
+                };
+            } },
+        };
+    }
+
+    pub const Vblank = struct {
+        user_data: *anyopaque,
+        sec: u32,
+        usec: u32,
+        sequence: u32,
+        crtc_id: u32,
+    };
+
+    pub const CrtcSequence = struct {
+        user_data: *anyopaque,
+        ns: i64,
+        sequence: u64,
+    };
+};
+
 pub const Connection = enum(u32) {
     connected = 1,
     disconnected = 2,
@@ -462,49 +507,6 @@ pub const DumbBuffer = struct {
     size: usize,
 };
 
-pub const Event = union(enum) {
-    vblank: Vblank,
-    flip_complete: Vblank,
-    crtc_sequence: CrtcSequence,
-
-    pub fn parse(event: *align(1) const sys.Event) Event {
-        return switch (event.type) {
-            inline .vblank, .flip_complete => |tag| @unionInit(Event, @tagName(tag), ev: {
-                const vblank: *align(1) const sys.EventVblank = @ptrCast(@alignCast(event));
-                break :ev .{
-                    .user_data = @ptrFromInt(vblank.user_data),
-                    .sec = vblank.tv_sec,
-                    .usec = vblank.tv_usec,
-                    .sequence = vblank.sequence,
-                    .crtc_id = vblank.crtc_id,
-                };
-            }),
-            .crtc_sequence => Event{ .crtc_sequence = ev: {
-                const crtc_sequence: *align(1) const sys.EventCrtcSequence = @ptrCast(@alignCast(event));
-                break :ev .{
-                    .user_data = @ptrFromInt(crtc_sequence.user_data),
-                    .ns = crtc_sequence.time_ns,
-                    .sequence = crtc_sequence.sequence,
-                };
-            } },
-        };
-    }
-
-    pub const Vblank = struct {
-        user_data: *anyopaque,
-        sec: u32,
-        usec: u32,
-        sequence: u32,
-        crtc_id: u32,
-    };
-
-    pub const CrtcSequence = struct {
-        user_data: *anyopaque,
-        ns: i64,
-        sequence: u64,
-    };
-};
-
 test {
-    std.testing.refAllDeclsRecursive(@This());
+    std.testing.refAllDecls(@This());
 }
