@@ -5,6 +5,7 @@ const log = std.log.scoped(.drm);
 pub const sys = @import("sys.zig");
 pub const Format = fmt.Format;
 pub const FormatModifiers = fmt.FormatModifiers;
+pub const ModeInfo = sys.mode.ModeInfo;
 
 pub const Card = struct {
     handle: std.Io.File,
@@ -64,11 +65,40 @@ pub const Card = struct {
         }
     }
 
+    pub fn setClientCapability(self: Card, capability: sys.ClientCapability, value: u64) sys.IoctlError!void {
+        var set_cap = sys.SetClientCap{
+            .capability = capability,
+            .value = value,
+        };
+        try sys.ioctl(self.handle.handle, .set_client_cap, &set_cap);
+    }
+
+    pub fn getCapability(self: Card, capability: sys.Capability) sys.IoctlError!u64 {
+        var get_cap = sys.GetCap{
+            .capability = capability,
+            .value = 0,
+        };
+        try sys.ioctl(self.handle.handle, .get_cap, &get_cap);
+        return get_cap.value;
+    }
+
+    pub fn createModesettingPropertyBlob(self: Card, data: []const u8) sys.IoctlError!u32 {
+        var create = std.mem.zeroInit(sys.mode.CreateBlob, .{
+            .length = @as(u32, @intCast(data.len)),
+            .data = @intFromPtr(data.ptr),
+        });
+        try sys.ioctl(self.handle.handle, .mode_createpropblob, &create);
+        return create.blob_id;
+    }
+
     // BEGIN MODESETTING API
 
     pub const GetResourcesError = sys.IoctlError || error{OutOfMemory};
 
-    pub fn getModesettingResourcesAlloc(self: Card, gpa: std.mem.Allocator) GetResourcesError!ModesettingResources {
+    pub fn getModesettingResourcesAlloc(
+        self: Card,
+        gpa: std.mem.Allocator,
+    ) GetResourcesError!ModesettingResources {
         while (true) {
             var res = std.mem.zeroes(sys.mode.CardRes);
             try sys.ioctl(self.handle.handle, .mode_getresources, &res);

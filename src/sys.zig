@@ -32,8 +32,8 @@ pub const Request = enum(u32) {
     // gem_close = drm_iow(0x09, drm_gem_close),
     // gem_flink = drm_iowr(0x0a, drm_gem_flink),
     // gem_open = drm_iowr(0x0b, drm_gem_open),
-    // get_cap = drm_iowr(0x0c, drm_get_cap),
-    // set_client_cap = drm_iow(0x0d, drm_set_client_cap),
+    get_cap = drm_iowr(0x0c, GetCap),
+    set_client_cap = drm_iow(0x0d, SetClientCap),
     set_unique = drm_iow(0x10, Unique),
     auth_magic = drm_iow(0x11, Auth),
     // block = drm_iowr(0x12, drm_block),
@@ -252,6 +252,43 @@ pub const SetVersion = extern struct {
     di_minor: c_int,
     dd_major: c_int,
     dd_minor: c_int,
+};
+
+pub const GetCap = extern struct {
+    capability: Capability,
+    value: u64,
+};
+
+pub const Capability = enum(u64) {
+    dumb_buffer = 0x1,
+    vblank_high_crtc = 0x2,
+    dumb_preferred_depth = 0x3,
+    dumb_buffer_shadow = 0x4,
+    prime = 0x5,
+    timestamp_monotonic = 0x6,
+    async_page_flip = 0x7,
+    cursor_width = 0x8,
+    cursor_height = 0x9,
+    addfbd_modifiers = 0x10,
+    page_flip_target = 0x11,
+    crtc_in_vblank_event = 0x12,
+    syncobj = 0x13,
+    syncobj_timeline = 0x14,
+    atomic_async_page_flip = 0x15,
+};
+
+pub const SetClientCap = extern struct {
+    capability: ClientCapability,
+    value: u64,
+};
+
+pub const ClientCapability = enum(u64) {
+    stereo_3d = 1,
+    universal_planes = 2,
+    atomic = 3,
+    aspect_ratio = 4,
+    writeback_connectors = 5,
+    cursor_plane_hotspot = 6,
 };
 
 pub const Ctx = extern struct {
