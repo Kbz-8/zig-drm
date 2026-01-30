@@ -412,6 +412,95 @@ pub const Card = struct {
         };
         try sys.ioctl(self.handle.handle, .mode_page_flip, &flip);
     }
+
+    pub const GetPlaneResourcesError = sys.IoctlError || error{OutOfMemory};
+
+    pub fn getPlaneResourcesAlloc(self: Card, gpa: std.mem.Allocator) GetPlaneResourcesError!PlaneResources {
+        while (true) {
+            var res = std.mem.zeroes(sys.mode.GetPlaneRes);
+            try sys.ioctl(self.handle.handle, .mode_getplaneresources, &res);
+            const cached = res;
+
+            const planes = try gpa.alloc(u32, res.count_planes);
+            errdefer gpa.free(planes);
+            res.plane_id_ptr = @intFromPtr(planes.ptr);
+
+            try sys.ioctl(self.handle.handle, .mode_getplaneresources, &res);
+            if (res.count_planes > cached.count_planes) {
+                gpa.free(planes);
+                continue;
+            }
+
+            return PlaneResources{ .planes = planes };
+        }
+    }
+
+    pub fn getPlaneResourcesBuffered(self: Card, plane_buf: []u32) GetPlaneResourcesError!PlaneResources {
+        var res = sys.mode.GetPlaneRes{
+            .count_planes = plane_buf.len,
+            .plane_id_ptr = @intFromPtr(plane_buf.ptr),
+        };
+        try sys.ioctl(self.handle.handle, .mode_getplaneresources, &res);
+        if (res.count_planes > plane_buf.len) return error.OutOfMemory;
+        return PlaneResources{ .planes = plane_buf[0..res.count_planes] };
+    }
+
+    pub const GetPlaneError = sys.IoctlError || error{OutOfMemory};
+
+    pub fn getPlaneAlloc(self: Card, gpa: std.mem.Allocator, id: u32) GetPlaneError!Plane {
+        while (true) {
+            var get = std.mem.zeroInit(sys.mode.GetPlane, .{ .plane_id = id });
+            try sys.ioctl(self.handle.handle, .mode_getplane, &get);
+            const cached = get;
+
+            const formats = try gpa.alloc(u32, get.count_format_types);
+            errdefer gpa.free(formats);
+            get.format_type_ptr = @intFromPtr(formats.ptr);
+
+            try sys.ioctl(self.handle.handle, .mode_getplane, &get);
+            if (get.count_format_types > cached.count_format_types) {
+                gpa.free(formats);
+                continue;
+            }
+
+            return Plane{
+                .id = id,
+                .formats = formats,
+                .crtc_id = get.crtc_id,
+                .fb_id = get.fb_id,
+                .crtc_x = 0,
+                .crtc_y = 0,
+                .x = 0,
+                .y = 0,
+                .possible_crtcs = get.possible_crtcs,
+                .gamma_size = get.gamma_size,
+            };
+        }
+    }
+
+    pub fn getPlaneBuffered(self: Card, format_buf: []u32, id: u32) GetPlaneError!Plane {
+        var get = std.mem.zeroInit(sys.mode.GetPlane, .{
+            .plane_id = id,
+            .count_format_types = format_buf.len,
+            .format_types_ptr = @intFromPtr(format_buf.ptr),
+        });
+
+        try sys.ioctl(self.handle.handle, .mode_getplane, &get);
+        if (get.count_format_types > format_buf.len) return error.OutOfMemory;
+
+        return Plane{
+            .id = id,
+            .formats = format_buf[0..get.count_format_types],
+            .crtc_id = get.crtc_id,
+            .fb_id = get.fb_id,
+            .crtc_x = 0,
+            .crtc_y = 0,
+            .x = 0,
+            .y = 0,
+            .possible_crtcs = get.possible_crtcs,
+            .gamma_size = get.gamma_size,
+        };
+    }
 };
 
 pub const Event = union(enum) {
@@ -535,6 +624,31 @@ pub const DumbBuffer = struct {
     height: u32,
     stride: u32,
     size: usize,
+};
+
+pub const PlaneResources = struct {
+    planes: []const u32,
+
+    pub fn deinit(self: PlaneResources, gpa: std.mem.Allocator) void {
+        gpa.free(self.planes);
+    }
+};
+
+pub const Plane = struct {
+    id: u32,
+    formats: []const u32,
+    crtc_id: u32,
+    fb_id: u32,
+    crtc_x: u32,
+    crtc_y: u32,
+    x: u32,
+    y: u32,
+    possible_crtcs: u32,
+    gamma_size: u32,
+
+    pub fn deinit(self: Plane, gpa: std.mem.Allocator) void {
+        gpa.free(self.formats);
+    }
 };
 
 test {
