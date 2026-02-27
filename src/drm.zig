@@ -7,6 +7,158 @@ pub const Format = fmt.Format;
 pub const FormatModifiers = fmt.FormatModifiers;
 pub const ModeInfo = sys.mode.ModeInfo;
 
+pub fn nodeIsDrm(io: std.Io, major: u32, minor: u32) bool {
+    const drm_node_path_format = "/sys/dev/char/{d}:{d}/device/drm";
+
+    var path_buf: [64]u8 = undefined;
+    const path = std.fmt.bufPrint(&path_buf, drm_node_path_format, .{ major, minor }) catch unreachable;
+
+    _ = std.Io.Dir.cwd().statFile(io, path, .{}) catch return false;
+
+    return true;
+}
+
+pub fn parseSubsystemType(io: std.Io, major: u32, minor: u32) !sys.BusType {
+    var path_buf: [std.os.linux.PATH_MAX]u8 = undefined;
+    var path = std.ArrayList(u8).initBuffer(&path_buf);
+    path.printAssumeCapacity("/sys/dev/char/{d}:{d}/device", .{major, minor});
+    path.appendSliceAssumeCapacity("/subsystem");
+
+    const bus_types = [_]struct{name: []const u8, bus_type: sys.BusType}{
+        .{ .name = "/pci", .bus_type = .pci },
+        .{ .name = "/usb", .bus_type = .usb },
+        .{ .name = "/platform", .bus_type = .platform },
+        .{ .name = "/spi", .bus_type = .platform },
+        .{ .name = "/host1x", .bus_type = .host1x },
+        .{ .name = "/virtio", .bus_type = .virtio },
+        .{ .name = "/faux", .bus_type = .faux },
+    };
+
+    var link_buf: [std.os.linux.PATH_MAX]u8 = undefined;
+    const link_len = try std.Io.Dir.cwd().readLink(io, path.items, &link_buf);
+    const link = link_buf[0..link_len];
+
+    const last = std.mem.findScalarLast(u8, link, '/') orelse unreachable;
+    const name = link[last..];
+    if (name.len == 0) return error.InvalidDevice;
+
+    const bus_type = for (bus_types) |bus_type| {
+        if (std.mem.eql(u8, bus_type.name, name)) break bus_type;
+    } else return error.InvalidDevice;
+
+    /* Try to get the parent (underlying) device type */
+    if (subsystem_type == DRM_BUS_VIRTIO) {
+        /* Assume virtio-pci on error */
+        if (!realpath(path, real_path))
+            return DRM_BUS_VIRTIO;
+        strncat(path, "/..", PATH_MAX);
+        subsystem_type = get_subsystem_type(path);
+        if (subsystem_type < 0)
+            return DRM_BUS_VIRTIO;
+     }
+    return subsystem_type;
+}
+
+pub const Device = struct {
+    nodes: [3][]const u8,
+    available_nodes: packed struct(u3) {
+        primary: bool = false,
+        /// Deprecated
+        control: bool = false,
+        render: bool = false,
+    },
+    bus_info: union(sys.BusType) {
+        pci: sys.PciBusInfo,
+        usb: sys.UsbBusInfo,
+        platform: sys.PlatformBusInfo,
+        host1x: sys.Host1xBusInfo,
+        faux: sys.FauxBusInfo,
+    },
+    device_info: union(sys.BusType) {
+        pci: sys.PciDeviceInfo,
+        usb: sys.UsbDeviceInfo,
+        platform: sys.PlatformDeviceInfo,
+        host1x: sys.Host1xDeviceInfo,
+        faux: sys.FauxDeviceInfo,
+    },
+
+    pub const GetFromDevIdFlags = packed struct {
+        get_pci_revision: bool = false,
+    };
+
+    const dev_t = std.posix.dev_t;
+    pub fn devMajor(dev: dev_t) u32 {
+        return ((dev & @as(dev_t, 0x00000000000fff00)) >> 8) |
+            ((dev & @as(dev_t, 0xfffff00000000000)) >> 32);
+    }
+
+    pub fn devMinor(dev: dev_t) u32 {
+        return ((dev & @as(dev_t, 0x00000000000000ff)) >> 0) |
+            ((dev & @as(dev_t, 0x00000ffffff00000)) >> 12);
+    }
+
+    pub fn makeDev(major: u32, minor: u32) dev_t {
+        return (@as(dev_t, major & 0x00000fff) << 8) |
+            (@as(dev_t, major & 0xfffff000) << 32) |
+            (@as(dev_t, minor & 0x000000ff) << 0) |
+            (@as(dev_t, minor & 0xffffff00) << 12);
+    }
+
+    pub fn getFromDevId(io: std.Io, devid: std.posix.dev_t, flags: GetFromDevIdFlags) !Device {
+        var local_devices: [256]Device = undefined;
+
+        const major = devMajor(devid);
+        const minor = devMinor(devid);
+
+        if (!nodeIsDrm(io, major, minor))
+            return error.NotDrmDevice;
+
+        // subsystem_type = drmParseSubsystemType(maj, min);
+        // if (subsystem_type < 0)
+        //     return subsystem_type;
+
+        // sysdir = opendir(DRM_DIR_NAME);
+        // if (!sysdir)
+        //     return -errno;
+
+        // i = 0;
+        // while ((dent = readdir(sysdir))) {
+        //     ret = process_device(&d, dent->d_name, subsystem_type, true, flags);
+        //     if (ret)
+        //         continue;
+
+        //     if (i >= MAX_DRM_NODES) {
+        //         fprintf(stderr, "More than %d drm nodes detected. "
+        //                 "Please report a bug - that should not happen.\n"
+        //                 "Skipping extra nodes\n", MAX_DRM_NODES);
+        //         break;
+        //     }
+        //     local_devices[i] = d;
+        //     i++;
+        // }
+        // node_count = i;
+
+        // drmFoldDuplicatedDevices(local_devices, node_count);
+
+        // *device = NULL;
+
+        // for (i = 0; i < node_count; i++) {
+        //     if (!local_devices[i])
+        //         continue;
+
+        //     if (drm_device_has_rdev(local_devices[i], find_rdev))
+        //         *device = local_devices[i];
+        //     else
+        //         drmFreeDevice(&local_devices[i]);
+        // }
+
+        // closedir(sysdir);
+        // if (*device == NULL)
+        //     return -ENODEV;
+        // return 0;
+    }
+};
+
 pub const Card = struct {
     handle: std.Io.File,
 
@@ -501,6 +653,67 @@ pub const Card = struct {
             .gamma_size = get.gamma_size,
         };
     }
+
+    pub const GetObjectPropertiesError = sys.IoctlError || error{OutOfMemory};
+
+    pub fn getObjectPropertiesAlloc(
+        self: Card,
+        gpa: std.mem.Allocator,
+        object_id: u32,
+        object_type: sys.mode.ObjType,
+    ) GetObjectPropertiesError!ObjectProperties {
+        while (true) {
+            var get = std.mem.zeroInit(sys.mode.ObjGetProperties, .{
+                .obj_id = object_id,
+                .obj_type = object_type,
+            });
+            try sys.ioctl(self.handle.handle, .mode_obj_getproperties, &get);
+            const cached = get;
+
+            const keys = try gpa.alloc(u32, get.count_props);
+            errdefer gpa.free(keys);
+            get.props_ptr = keys.ptr;
+
+            const values = try gpa.alloc(u64, get.count_props);
+            errdefer gpa.free(values);
+            get.prop_values_ptr = values.ptr;
+
+            try sys.ioctl(self.handle.handle, .mode_obj_getproperties, &get);
+            if (get.count_props > cached.count_props) {
+                gpa.free(keys);
+                gpa.free(values);
+                continue;
+            }
+
+            return ObjectProperties{
+                .keys = keys,
+                .values = values,
+            };
+        }
+    }
+
+    pub fn getObjectPropertiesBuffered(
+        self: Card,
+        key_buf: []u32,
+        value_buf: []u64,
+        object_id: u32,
+        object_type: sys.mode.ObjType,
+    ) GetObjectPropertiesError!ObjectProperties {
+        var get = sys.mode.ObjGetProperties{
+            .obj_id = object_id,
+            .obj_type = object_type,
+            .count_props = @intCast(@min(key_buf.len, value_buf.len)),
+            .props_ptr = @intFromEnum(key_buf.ptr),
+            .prop_values_ptr = @intFromEnum(value_buf.ptr),
+        };
+        try sys.ioctl(self.handle.handle, .mode_obj_getproperties, &get);
+        if (get.count_props > @min(key_buf.len, value_buf.len)) return error.OutOfMemory;
+
+        return ObjectProperties{
+            .keys = key_buf[0..get.count_props],
+            .values = value_buf[0..get.count_props],
+        };
+    }
 };
 
 pub const Event = union(enum) {
@@ -648,6 +861,16 @@ pub const Plane = struct {
 
     pub fn deinit(self: Plane, gpa: std.mem.Allocator) void {
         gpa.free(self.formats);
+    }
+};
+
+pub const ObjectProperties = struct {
+    keys: []const u32,
+    values: []const u64,
+
+    pub fn deinit(self: ObjectProperties, gpa: std.mem.Allocator) void {
+        gpa.free(self.keys);
+        gpa.free(self.values);
     }
 };
 

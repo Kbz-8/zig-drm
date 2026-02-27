@@ -334,6 +334,17 @@ pub const EventCrtcSequence = extern struct {
     sequence: u64,
 };
 
+pub const BusType = enum(u32) {
+    pci = 0,
+    usb = 1,
+    platform = 2,
+    host1x = 3,
+    faux = 4,
+    virtio = 0x10,
+};
+
+pub const PciBusInfo = extern struct {};
+
 pub const mode = struct {
     pub const display_mode_len = 32;
     pub const prop_name_len = 32;
@@ -617,7 +628,19 @@ pub const mode = struct {
         prop_values_ptr: u64,
         count_props: u32,
         obj_id: u32,
-        obj_type: u32,
+        obj_type: ObjType,
+    };
+
+    pub const ObjType = enum(u32) {
+        crtc = 0xcccccccc,
+        connector = 0xc0c0c0c0,
+        encoder = 0xe0e0e0e0,
+        mode = 0xdededede,
+        property = 0xb0b0b0b0,
+        fb = 0xfbfbfbfb,
+        blob = 0xbbbbbbbb,
+        plane = 0xeeeeeeee,
+        any = 0,
     };
 
     pub const ObjSetProperty = extern struct {
