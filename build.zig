@@ -25,4 +25,8 @@ pub fn build(b: *std.Build) void {
     const run_tests = b.addRunArtifact(test_exe);
     const test_step = b.step("test", "Run tests.");
     test_step.dependOn(&run_tests.step);
+
+    const check_obj = b.addObject(.{ .name = "check", .root_module = drm });
+    const check_step = b.step("check", "ZLS check");
+    check_step.dependOn(&check_obj.step);
 }
