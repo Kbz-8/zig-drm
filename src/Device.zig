@@ -7,12 +7,11 @@ const node_max = 3;
 
 const Device = @This();
 
-nodes: [node_max][]const u8,
-available_nodes: packed struct(u3) {
-    primary: bool = false,
+nodes: struct {
+    primary: ?[drm.max_node_name]u8,
     /// Deprecated
-    control: bool = false,
-    render: bool = false,
+    control: ?[drm.max_node_name]u8,
+    render: ?[drm.max_node_name]u8,
 },
 bus_info: union(BusType) {
     pci: PciBusInfo,
@@ -132,6 +131,55 @@ pub const FauxBusInfo = struct {
     name: [faux_device_name_len]u8,
 };
 
+pub fn parseSubsystemType(io: std.Io, major: u32, minor: u32) !Device.BusType {
+    var path_buf: [std.os.linux.PATH_MAX]u8 = undefined;
+    var path = std.ArrayList(u8).initBuffer(&path_buf);
+    path.printAssumeCapacity("/sys/dev/char/{d}:{d}/device", .{ major, minor });
+
+    var subsystem_type = try getSubsystemType(io, path.items);
+    if (subsystem_type == .virtio) {
+        path.appendSliceAssumeCapacity("/..");
+        subsystem_type = getSubsystemType(io, path.items) catch .virtio;
+    }
+
+    return subsystem_type;
+}
+
+fn getSubsystemType(io: std.Io, device_path: []const u8) !Device.BusType {
+    const bus_types = [_]struct { name: []const u8, bus_type: Device.BusType }{
+        .{ .name = "/pci", .bus_type = .pci },
+        .{ .name = "/usb", .bus_type = .usb },
+        .{ .name = "/platform", .bus_type = .platform },
+        .{ .name = "/spi", .bus_type = .platform },
+        .{ .name = "/host1x", .bus_type = .host1x },
+        .{ .name = "/virtio", .bus_type = .virtio },
+        .{ .name = "/faux", .bus_type = .faux },
+    };
+
+    var path_buf: [std.os.linux.PATH_MAX]u8 = undefined;
+    const path = std.fmt.bufPrint(&path_buf, "{s}/subsystem", .{device_path}) catch unreachable;
+
+    var link_buf: [std.os.linux.PATH_MAX]u8 = undefined;
+    const link_len = try std.Io.Dir.cwd().readLink(io, path, &link_buf);
+    const link = link_buf[0..link_len];
+
+    const last = std.mem.findScalarLast(u8, link, '/') orelse unreachable;
+    const name = link[last..];
+    if (name.len == 0) return error.InvalidDevice;
+
+    return for (bus_types) |bus_type| {
+        if (std.mem.eql(u8, bus_type.name, name)) break bus_type.bus_type;
+    } else error.InvalidDevice;
+}
+
+pub const NodeType = enum {
+    primary,
+    /// Deprecated
+    control,
+    render,
+    _max,
+};
+
 fn processDevice(
     io: std.Io,
     name: []const u8,
@@ -166,6 +214,40 @@ fn processDevice(
         .platform => error.PlatformUnimplemented,
         .host1x => error.Host1xUnimplemented,
         .faux => error.FauxUnimplemented,
+    };
+}
+
+fn processPciDevice(
+    node: []const u8,
+    node_type: drm.NodeType,
+    major: u32,
+    minor: u32,
+    fetch_devinfo: bool,
+    flags: Flags,
+) !*Device {
+    var device = Device{
+        .nodes = .{ .primary = null, .control = null, .render = null },
+        .bus_info = undefined,
+        .device_info = undefined,
+    };
+
+    _ = &device;
+
+    return device;
+}
+
+fn parsePciBusInfo(major: u32, minor: u32) !PciBusInfo {
+    const pci_path = try getPciPath(major, minor);
+
+    const value = try sysfsUeventGet(&pci_path, "PCI_SLOT_NAME");
+
+    const format = "{x:4}:{x:2}:{x:2}.{d:1}";
+
+    return PciBusInfo{
+        .domain = 0,
+        .bus = 0,
+        .dev = 0,
+        .func = 0,
     };
 }
 

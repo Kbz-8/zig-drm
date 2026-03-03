@@ -48,55 +48,6 @@ pub fn nodeIsDrm(io: std.Io, major: u32, minor: u32) bool {
     return if (std.Io.Dir.cwd().statFile(io, path, .{})) |_| true else |_| false;
 }
 
-pub fn parseSubsystemType(io: std.Io, major: u32, minor: u32) !Device.BusType {
-    var path_buf: [std.os.linux.PATH_MAX]u8 = undefined;
-    var path = std.ArrayList(u8).initBuffer(&path_buf);
-    path.printAssumeCapacity("/sys/dev/char/{d}:{d}/device", .{ major, minor });
-
-    var subsystem_type = try getSubsystemType(io, path.items);
-    if (subsystem_type == .virtio) {
-        path.appendSliceAssumeCapacity("/..");
-        subsystem_type = getSubsystemType(io, path.items) catch .virtio;
-    }
-
-    return subsystem_type;
-}
-
-fn getSubsystemType(io: std.Io, device_path: []const u8) !Device.BusType {
-    const bus_types = [_]struct { name: []const u8, bus_type: Device.BusType }{
-        .{ .name = "/pci", .bus_type = .pci },
-        .{ .name = "/usb", .bus_type = .usb },
-        .{ .name = "/platform", .bus_type = .platform },
-        .{ .name = "/spi", .bus_type = .platform },
-        .{ .name = "/host1x", .bus_type = .host1x },
-        .{ .name = "/virtio", .bus_type = .virtio },
-        .{ .name = "/faux", .bus_type = .faux },
-    };
-
-    var path_buf: [std.os.linux.PATH_MAX]u8 = undefined;
-    const path = std.fmt.bufPrint(&path_buf, "{s}/subsystem", .{device_path}) catch unreachable;
-
-    var link_buf: [std.os.linux.PATH_MAX]u8 = undefined;
-    const link_len = try std.Io.Dir.cwd().readLink(io, path, &link_buf);
-    const link = link_buf[0..link_len];
-
-    const last = std.mem.findScalarLast(u8, link, '/') orelse unreachable;
-    const name = link[last..];
-    if (name.len == 0) return error.InvalidDevice;
-
-    return for (bus_types) |bus_type| {
-        if (std.mem.eql(u8, bus_type.name, name)) break bus_type.bus_type;
-    } else error.InvalidDevice;
-}
-
-pub const NodeType = enum {
-    primary,
-    /// Deprecated
-    control,
-    render,
-    _max,
-};
-
 pub const Event = union(enum) {
     vblank: Vblank,
     flip_complete: Vblank,
