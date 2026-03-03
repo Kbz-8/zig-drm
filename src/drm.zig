@@ -22,17 +22,17 @@ pub const max_node_name = dir_name.len + @max(
     render_minor_name.len,
 ) + 3;
 
-pub fn devMajor(dev: dev_t) u32 {
+pub inline fn devMajor(dev: dev_t) u32 {
     return @intCast(((dev & @as(dev_t, 0x00000000000fff00)) >> 8) |
         ((dev & @as(dev_t, 0xfffff00000000000)) >> 32));
 }
 
-pub fn devMinor(dev: dev_t) u32 {
+pub inline fn devMinor(dev: dev_t) u32 {
     return @intCast(((dev & @as(dev_t, 0x00000000000000ff)) >> 0) |
         ((dev & @as(dev_t, 0x00000ffffff00000)) >> 12));
 }
 
-pub fn makeDev(major: u32, minor: u32) dev_t {
+pub inline fn makeDev(major: u32, minor: u32) dev_t {
     return (@as(dev_t, major & 0x00000fff) << 8) |
         (@as(dev_t, major & 0xfffff000) << 32) |
         (@as(dev_t, minor & 0x000000ff) << 0) |

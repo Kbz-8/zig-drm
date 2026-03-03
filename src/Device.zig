@@ -2,17 +2,12 @@ const std = @import("std");
 const drm = @import("drm.zig");
 const sys = @import("sys.zig");
 const log = std.log.scoped(.drm);
-
-const node_max = 3;
+const path_max = std.os.linux.PATH_MAX;
 
 const Device = @This();
 
-nodes: struct {
-    primary: ?[drm.max_node_name]u8,
-    /// Deprecated
-    control: ?[drm.max_node_name]u8,
-    render: ?[drm.max_node_name]u8,
-},
+node_type: NodeType,
+node_path_buf: [drm.max_node_name:0]u8,
 bus_info: union(BusType) {
     pci: PciBusInfo,
     usb: UsbBusInfo,
@@ -21,7 +16,7 @@ bus_info: union(BusType) {
     faux: FauxBusInfo,
     virtio: void,
 },
-device_info: union(BusType) {
+device_info: ?union(BusType) {
     pci: PciDeviceInfo,
     usb: UsbDeviceInfo,
     platform: PlatformDeviceInfo,
@@ -30,11 +25,15 @@ device_info: union(BusType) {
     virtio: void,
 },
 
+pub fn nodePath(self: *const Device) []const u8 {
+    return std.mem.sliceTo(&self.node_path_buf, 0);
+}
+
 pub const Flags = packed struct {
     get_pci_revision: bool = false,
 };
 
-pub fn getFromDevId(io: std.Io, devid: std.posix.dev_t, flags: Flags) !Device {
+pub fn getFromDevId(io: std.Io, gpa: std.mem.Allocator, devid: std.posix.dev_t, flags: Flags) !Device {
     var local_devices: [drm.max_nodes]Device = undefined;
 
     const major = drm.devMajor(devid);
@@ -43,15 +42,15 @@ pub fn getFromDevId(io: std.Io, devid: std.posix.dev_t, flags: Flags) !Device {
     if (!drm.nodeIsDrm(io, major, minor))
         return error.NotDrmDevice;
 
-    const subsystem_type = try drm.parseSubsystemType(io, major, minor);
+    const subsystem_type = try parseSubsystemType(io, major, minor);
 
     const sysdir = try std.Io.Dir.openDirAbsolute(io, drm.dir_name, .{ .iterate = true });
     defer sysdir.close(io);
 
     var it = sysdir.iterate();
-    const i: usize = 0;
-    while (try it.next(io)) |entry| {
-        const dev = processDevice(entry.name, subsystem_type, true, flags) catch continue;
+    var i: usize = 0;
+    while (try it.next(io)) |entry| if (entry.kind == .character_device) {
+        const dev = processDevice(io, gpa, entry.name, subsystem_type, true, flags) catch continue;
 
         if (i >= drm.max_nodes) {
             log.err(
@@ -63,7 +62,7 @@ pub fn getFromDevId(io: std.Io, devid: std.posix.dev_t, flags: Flags) !Device {
 
         local_devices[i] = dev;
         i += 1;
-    }
+    };
 
     return for (local_devices[0..i]) |dev| {
         if (hasRdev(dev, devid)) break dev;
@@ -132,7 +131,7 @@ pub const FauxBusInfo = struct {
 };
 
 pub fn parseSubsystemType(io: std.Io, major: u32, minor: u32) !Device.BusType {
-    var path_buf: [std.os.linux.PATH_MAX]u8 = undefined;
+    var path_buf: [path_max]u8 = undefined;
     var path = std.ArrayList(u8).initBuffer(&path_buf);
     path.printAssumeCapacity("/sys/dev/char/{d}:{d}/device", .{ major, minor });
 
@@ -156,10 +155,10 @@ fn getSubsystemType(io: std.Io, device_path: []const u8) !Device.BusType {
         .{ .name = "/faux", .bus_type = .faux },
     };
 
-    var path_buf: [std.os.linux.PATH_MAX]u8 = undefined;
+    var path_buf: [path_max]u8 = undefined;
     const path = std.fmt.bufPrint(&path_buf, "{s}/subsystem", .{device_path}) catch unreachable;
 
-    var link_buf: [std.os.linux.PATH_MAX]u8 = undefined;
+    var link_buf: [path_max]u8 = undefined;
     const link_len = try std.Io.Dir.cwd().readLink(io, path, &link_buf);
     const link = link_buf[0..link_len];
 
@@ -177,39 +176,39 @@ pub const NodeType = enum {
     /// Deprecated
     control,
     render,
-    _max,
+    pub const max = 3;
 };
 
 fn processDevice(
     io: std.Io,
+    gpa: std.mem.Allocator,
     name: []const u8,
-    required_subsystem_type: sys.BusType,
+    required_subsystem_type: BusType,
     fetch_devinfo: bool,
     flags: Flags,
 ) !Device {
     const max_node_length = std.mem.alignForward(usize, drm.max_node_name, @sizeOf(usize));
     const node_type = try getNodeType(name);
 
-    var path_buf: [std.os.linux.PATH_MAX]u8 = undefined;
+    var path_buf: [path_max]u8 = undefined;
     const node = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ drm.dir_name, name }) catch unreachable;
 
     if (node.len + 1 > max_node_length)
         return error.NodePathTooLong;
 
     const stat = try statx(node);
+    const major = stat.rdev_major;
+    const minor = stat.rdev_minor;
 
-    if (!drm.nodeIsDrm(io, stat.rdev_major, stat.rdev_minor) || !std.os.linux.S.ISCHR(stat.mode))
+    if (!drm.nodeIsDrm(io, stat.rdev_major, stat.rdev_minor) or !std.os.linux.S.ISCHR(stat.mode))
         return error.InvalidDevice;
 
-    const subsystem_type = try drm.parseSubsystemType(io, stat.rdev_major, stat.rdev_minor);
+    const subsystem_type = try parseSubsystemType(io, stat.rdev_major, stat.rdev_minor);
     if (subsystem_type != required_subsystem_type)
         return error.IncorrectSubsystemType;
 
-    _ = fetch_devinfo;
-    _ = flags;
-    _ = node_type;
     return switch (subsystem_type) {
-        .pci, .virtio => error.PciUnimplemented,
+        .pci, .virtio => try processPciDevice(io, gpa, node, node_type, major, minor, fetch_devinfo, flags),
         .usb => error.UsbInimplemented,
         .platform => error.PlatformUnimplemented,
         .host1x => error.Host1xUnimplemented,
@@ -218,61 +217,172 @@ fn processDevice(
 }
 
 fn processPciDevice(
-    node: []const u8,
-    node_type: drm.NodeType,
+    io: std.Io,
+    gpa: std.mem.Allocator,
+    node_path: []const u8,
+    node_type: NodeType,
     major: u32,
     minor: u32,
     fetch_devinfo: bool,
     flags: Flags,
-) !*Device {
+) !Device {
     var device = Device{
-        .nodes = .{ .primary = null, .control = null, .render = null },
-        .bus_info = undefined,
-        .device_info = undefined,
+        .node_type = node_type,
+        .node_path_buf = @splat(0),
+        .bus_info = .{ .pci = try parsePciBusInfo(io, gpa, major, minor) },
+        .device_info = if (fetch_devinfo) .{ .pci = try parsePciDeviceInfo(io, major, minor, flags) } else null,
     };
-
-    _ = &device;
-
+    @memcpy(device.node_path_buf[0..node_path.len], node_path);
     return device;
 }
 
-fn parsePciBusInfo(major: u32, minor: u32) !PciBusInfo {
-    const pci_path = try getPciPath(major, minor);
+fn parsePciBusInfo(io: std.Io, gpa: std.mem.Allocator, major: u32, minor: u32) !PciBusInfo {
+    var pci_path_buf: [path_max]u8 = undefined;
+    const pci_path = try getPciPath(io, &pci_path_buf, major, minor);
 
-    const value = try sysfsUeventGet(&pci_path, "PCI_SLOT_NAME");
+    const value = try sysfsUeventGet(io, gpa, pci_path, "PCI_SLOT_NAME", .{});
+    defer gpa.free(value);
 
-    const format = "{x:4}:{x:2}:{x:2}.{d:1}";
+    const domain = try std.fmt.parseInt(u16, value[0..4], 16);
+    const bus = try std.fmt.parseInt(u8, value[5..7], 16);
+    const dev = try std.fmt.parseInt(u8, value[8..10], 16);
+    const func = try std.fmt.parseInt(u8, value[11..12], 16);
 
     return PciBusInfo{
-        .domain = 0,
-        .bus = 0,
-        .dev = 0,
-        .func = 0,
+        .domain = domain,
+        .bus = bus,
+        .dev = dev,
+        .func = func,
+    };
+}
+
+fn parsePciDeviceInfo(io: std.Io, major: u32, minor: u32, flags: Flags) !PciDeviceInfo {
+    return if (!flags.get_pci_revision)
+        parseSeparateSysfsFiles(io, major, minor, true)
+    else
+        parseSeparateSysfsFiles(io, major, minor, false) catch
+            parseConfigSysfsFile(io, major, minor);
+}
+
+fn getPciPath(io: std.Io, buf: []u8, major: u32, minor: u32) ![]const u8 {
+    var path_buf: [path_max]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "/sys/dev/char/{}:{}/device", .{ major, minor });
+
+    const len = try std.Io.Dir.realPathFileAbsolute(io, path, buf);
+    const real_path = buf[0..len];
+
+    if (std.mem.endsWith(u8, real_path, "/virtio")) return buf[0 .. len - 7];
+    return real_path;
+}
+
+fn sysfsUeventGet(
+    io: std.Io,
+    gpa: std.mem.Allocator,
+    path: []const u8,
+    comptime format: []const u8,
+    args: anytype,
+) ![]const u8 {
+    const key = try std.fmt.allocPrint(gpa, format, args);
+    defer gpa.free(key);
+
+    var filename_buf: [path_max]u8 = undefined;
+    const filename = try std.fmt.bufPrint(&filename_buf, "{s}/uevent", .{path});
+
+    const file = try std.Io.Dir.openFileAbsolute(io, filename, .{});
+    defer file.close(io);
+
+    var reader = file.reader(io, &.{});
+    const content = try reader.interface.allocRemaining(gpa, .unlimited);
+    defer gpa.free(content);
+
+    var it = std.mem.tokenizeScalar(u8, content, '\n');
+    while (it.next()) |line| {
+        if (std.mem.eql(u8, line[0..key.len], key) and line[key.len] == '=') {
+            return gpa.dupe(u8, line[key.len + 1 ..]);
+        }
+    }
+
+    return error.KeyNotFound;
+}
+
+fn parseSeparateSysfsFiles(
+    io: std.Io,
+    major: u32,
+    minor: u32,
+    ignore_revision: bool,
+) !PciDeviceInfo {
+    const attrs = [_][]const u8{
+        "revision",
+        "vendor",
+        "device",
+        "subsystem_vendor",
+        "subsystem_device",
+    };
+
+    var pci_path_buf: [path_max]u8 = undefined;
+    const pci_path = try getPciPath(io, &pci_path_buf, major, minor);
+    const start: usize = if (ignore_revision) 1 else 0;
+
+    var data: [attrs.len]u16 = undefined;
+    for (attrs[start..], data[start..]) |attr, *value| {
+        var path_buf: [path_max]u8 = undefined;
+        const path = try std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ pci_path, attr });
+
+        const file = try std.Io.Dir.openFileAbsolute(io, path, .{});
+        defer file.close(io);
+
+        var value_buf: [16]u8 = undefined;
+        const len = try file.readStreaming(io, &.{&value_buf}) - 1;
+
+        value.* = try std.fmt.parseInt(u16, value_buf[0..len], 0);
+    }
+
+    return PciDeviceInfo{
+        .revision_id = if (ignore_revision) 0xff else @intCast(data[0] & 0xff),
+        .vendor_id = data[1] & 0xffff,
+        .device_id = data[2] & 0xffff,
+        .subvendor_id = data[3] & 0xffff,
+        .subdevice_id = data[4] & 0xffff,
+    };
+}
+
+fn parseConfigSysfsFile(io: std.Io, major: u32, minor: u32) !PciDeviceInfo {
+    var pci_path_buf: [path_max]u8 = undefined;
+    const pci_path = try getPciPath(io, &pci_path_buf, major, minor);
+
+    var path_buf: [path_max]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/config", .{pci_path});
+
+    const file = try std.Io.Dir.openFileAbsolute(io, path, .{});
+    defer file.close(io);
+
+    var config: [64]u8 = undefined;
+    _ = try file.readStreaming(io, &.{&config});
+
+    return PciDeviceInfo{
+        .vendor_id = config[0] | @as(u16, config[1]) << 8,
+        .device_id = config[2] | @as(u16, config[3]) << 8,
+        .revision_id = config[8],
+        .subvendor_id = config[44] | @as(u16, config[45]) << 8,
+        .subdevice_id = config[46] | @as(u16, config[47]) << 8,
     };
 }
 
 fn hasRdev(dev: Device, rdev: std.posix.dev_t) bool {
-    const node_fields = @typeInfo(@FieldType(Device, "available_nodes")).@"struct".fields;
-    inline for (node_fields, dev.nodes) |field, node| {
-        if (@field(dev.available_nodes, field.name)) {
-            const stat = statx(node) catch continue;
-            if (drm.makeDev(stat.rdev_major, stat.rdev_minor) == rdev) return true;
-        }
-    }
-
-    return false;
+    const stat = statx(dev.nodePath()) catch return false;
+    return drm.makeDev(stat.rdev_major, stat.rdev_minor) == rdev;
 }
 
-fn getNodeType(name: []const u8) !drm.NodeType {
-    if (std.mem.eql(u8, name, drm.primary_minor_name)) return .primary;
-    if (std.mem.eql(u8, name, drm.control_minor_name)) return .control;
-    if (std.mem.eql(u8, name, drm.render_minor_name)) return .render;
+fn getNodeType(name: []const u8) !NodeType {
+    if (std.mem.eql(u8, name[0..drm.primary_minor_name.len], drm.primary_minor_name)) return .primary;
+    if (std.mem.eql(u8, name[0..drm.control_minor_name.len], drm.control_minor_name)) return .control;
+    if (std.mem.eql(u8, name[0..drm.render_minor_name.len], drm.render_minor_name)) return .render;
 
     return error.InvalidName;
 }
 
 fn statx(path: []const u8) !std.os.linux.Statx {
-    const posix_path = std.posix.toPosixPath(path);
+    const posix_path = try std.posix.toPosixPath(path);
     var stat_buf: std.os.linux.Statx = undefined;
     const rc = std.os.linux.statx(std.os.linux.AT.FDCWD, &posix_path, 0, .{}, &stat_buf);
     return switch (std.posix.errno(rc)) {
