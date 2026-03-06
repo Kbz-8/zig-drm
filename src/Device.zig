@@ -4,6 +4,7 @@ const path_max = std.os.linux.PATH_MAX;
 const Card = @import("Card.zig");
 const drm = @import("drm.zig");
 const sys = @import("sys.zig");
+const util = @import("util.zig");
 
 const log = std.log.scoped(.drm);
 const Device = @This();
@@ -183,6 +184,14 @@ pub const NodeType = enum {
     control,
     render,
     pub const max = 3;
+
+    pub fn name(self: NodeType) []const u8 {
+        return switch (self) {
+            .primary => drm.primary_minor_name,
+            .control => drm.control_minor_name,
+            .render => drm.render_minor_name,
+        };
+    }
 };
 
 fn processDevice(
@@ -202,7 +211,7 @@ fn processDevice(
     if (node.len + 1 > max_node_length)
         return error.NodePathTooLong;
 
-    const stat = try statx(node);
+    const stat = try util.statPath(node);
     const major = stat.rdev_major;
     const minor = stat.rdev_minor;
 
@@ -375,7 +384,7 @@ fn parseConfigSysfsFile(io: std.Io, major: u32, minor: u32) !PciDeviceInfo {
 }
 
 fn hasRdev(dev: Device, rdev: std.posix.dev_t) bool {
-    const stat = statx(dev.nodePath()) catch return false;
+    const stat = util.statPath(dev.nodePath()) catch return false;
     return drm.makeDev(stat.rdev_major, stat.rdev_minor) == rdev;
 }
 
@@ -385,14 +394,4 @@ fn getNodeType(name: []const u8) !NodeType {
     if (std.mem.eql(u8, name[0..drm.render_minor_name.len], drm.render_minor_name)) return .render;
 
     return error.InvalidName;
-}
-
-fn statx(path: []const u8) !std.os.linux.Statx {
-    const posix_path = try std.posix.toPosixPath(path);
-    var stat_buf: std.os.linux.Statx = undefined;
-    const rc = std.os.linux.statx(std.os.linux.AT.FDCWD, &posix_path, 0, .{}, &stat_buf);
-    return switch (std.posix.errno(rc)) {
-        .SUCCESS => stat_buf,
-        else => |err| std.posix.unexpectedErrno(err),
-    };
 }

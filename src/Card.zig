@@ -1,11 +1,12 @@
 const std = @import("std");
 
+const Device = @import("Device.zig");
 const drm = @import("drm.zig");
 const fmt = @import("format.zig");
 const sys = @import("sys.zig");
+const util = @import("util.zig");
 
 const log = std.log.scoped(.drm);
-
 const Card = @This();
 
 handle: std.Io.File,
@@ -24,19 +25,30 @@ pub fn open(io: std.Io, path: []const u8) OpenError!Card {
 
 pub const OpenAutoError = OpenError || std.Io.Dir.Iterator.Error || error{NoDevicesFound};
 
-pub fn openAuto(io: std.Io) OpenAutoError!Card {
+pub fn openAuto(io: std.Io, target_type: ?drm.Device.NodeType) OpenAutoError!Card {
     const dir = try std.Io.Dir.openDirAbsolute(io, "/dev/dri", .{ .iterate = true });
     defer dir.close(io);
 
     var it = dir.iterateAssumeFirstIteration();
-    while (try it.next(io)) |entry| if (entry.kind == .character_device)
-        return Card{ .handle = try dir.openFile(io, entry.name, .{ .mode = .read_write }) };
+    while (try it.next(io)) |entry| if (entry.kind == .character_device) {
+        if (target_type) |t| if (!std.mem.startsWith(u8, entry.name, t.name())) continue;
+        return Card{ .handle = dir.openFile(io, entry.name, .{ .mode = .read_write }) catch continue };
+    };
 
     return error.NoDevicesFound;
 }
 
 pub fn close(self: Card, io: std.Io) void {
     self.handle.close(io);
+}
+
+pub fn getDevId(self: Card) !std.posix.dev_t {
+    const stat = try util.statFile(self.handle.handle);
+    return drm.makeDev(stat.rdev_major, stat.rdev_minor);
+}
+
+pub fn getDevice(self: Card, io: std.Io, gpa: std.mem.Allocator, flags: Device.Flags) !Device {
+    return .getFromDevId(io, gpa, try self.getDevId(), flags);
 }
 
 pub fn handleEvents(
