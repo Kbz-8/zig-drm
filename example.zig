@@ -5,12 +5,13 @@ pub fn main(init: std.process.Init) !void {
     const io = init.io;
     const gpa = init.gpa;
 
-    const devid = drm.makeDev(226, 128);
-    const device = try drm.Device.getFromDevId(io, gpa, devid, .{});
+    const device = drm.Device.getFromDevId(io, gpa, drm.makeDev(226, 0), .{}) catch
+        try drm.Device.getFromDevId(io, gpa, drm.makeDev(226, 1), .{});
 
     std.log.info("Device node path: {s}.", .{device.nodePath()});
 
-    const card = try drm.Card.openAuto(io);
+    // const card = try drm.Card.openAuto(io);
+    const card = try device.openNode(io);
     defer card.close(io);
     const res = try card.getModesettingResources(gpa);
     defer res.deinit(gpa);

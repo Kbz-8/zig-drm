@@ -1,9 +1,11 @@
 const std = @import("std");
-const drm = @import("drm.zig");
-const sys = @import("sys.zig");
-const log = std.log.scoped(.drm);
 const path_max = std.os.linux.PATH_MAX;
 
+const Card = @import("Card.zig");
+const drm = @import("drm.zig");
+const sys = @import("sys.zig");
+
+const log = std.log.scoped(.drm);
 const Device = @This();
 
 node_type: NodeType,
@@ -67,6 +69,10 @@ pub fn getFromDevId(io: std.Io, gpa: std.mem.Allocator, devid: std.posix.dev_t, 
     return for (local_devices[0..i]) |dev| {
         if (hasRdev(dev, devid)) break dev;
     } else error.NoDeviceFound;
+}
+
+pub fn openNode(self: *const Device, io: std.Io) std.Io.File.OpenError!Card {
+    return Card.open(io, self.nodePath());
 }
 
 pub const BusType = enum(c_int) {
