@@ -2,14 +2,14 @@ const std = @import("std");
 
 pub fn statPath(path: []const u8) !std.os.linux.Statx {
     const posix_path = try std.posix.toPosixPath(path);
-    return statxInner(std.os.linux.AT.FDCWD, &posix_path, 0);
+    return stat(std.os.linux.AT.FDCWD, &posix_path, 0);
 }
 
 pub fn statFile(fd: std.posix.fd_t) !std.os.linux.Statx {
-    return statxInner(fd, "", std.os.linux.AT.EMPTY_PATH);
+    return stat(fd, "", std.os.linux.AT.EMPTY_PATH);
 }
 
-fn statxInner(fd: std.posix.fd_t, path: [*:0]const u8, flags: u32) !std.os.linux.Statx {
+pub fn stat(fd: std.posix.fd_t, path: [*:0]const u8, flags: u32) !std.os.linux.Statx {
     var stat_buf: std.os.linux.Statx = undefined;
     const rc = std.posix.system.statx(fd, path, flags, .{}, &stat_buf);
     return switch (std.posix.errno(rc)) {

@@ -17,7 +17,7 @@ pub fn open(io: std.Io, path: []const u8) OpenError!Card {
     if (std.fs.path.isAbsolute(path))
         return Card{ .handle = try std.Io.Dir.openFileAbsolute(io, path, .{ .mode = .read_write }) };
 
-    const dir = try std.Io.Dir.openDirAbsolute(io, "/dev/dri", .{});
+    const dir = try std.Io.Dir.openDirAbsolute(io, drm.dir_name, .{});
     defer dir.close(io);
 
     return Card{ .handle = try dir.openFile(io, path, .{ .mode = .read_write }) };
@@ -26,13 +26,28 @@ pub fn open(io: std.Io, path: []const u8) OpenError!Card {
 pub const OpenAutoError = OpenError || std.Io.Dir.Iterator.Error || error{NoDevicesFound};
 
 pub fn openAuto(io: std.Io, target_type: ?drm.Device.NodeType) OpenAutoError!Card {
-    const dir = try std.Io.Dir.openDirAbsolute(io, "/dev/dri", .{ .iterate = true });
+    const dir = try std.Io.Dir.openDirAbsolute(io, drm.dir_name, .{ .iterate = true });
     defer dir.close(io);
 
     var it = dir.iterateAssumeFirstIteration();
     while (try it.next(io)) |entry| if (entry.kind == .character_device) {
         if (target_type) |t| if (!std.mem.startsWith(u8, entry.name, t.name())) continue;
         return Card{ .handle = dir.openFile(io, entry.name, .{ .mode = .read_write }) catch continue };
+    };
+
+    return error.NoDevicesFound;
+}
+
+pub fn openForDev(io: std.Io, dev: std.posix.dev_t) OpenAutoError!Card {
+    const dir = try std.Io.Dir.openDirAbsolute(io, drm.dir_name, .{ .iterate = true });
+    defer dir.close(io);
+
+    var it = dir.iterateAssumeFirstIteration();
+    while (try it.next(io)) |entry| if (entry.kind == .character_device) {
+        const posix_name = std.posix.toPosixPath(entry.name);
+        const stat = util.stat(dir.handle, &posix_name, 0) catch continue;
+        if (drm.makeDev(stat.rdev_major, stat.rdev_minor) == dev)
+            return Card{ .handle = try dir.openFile(io, entry.name, .{ .mode = .read_write }) };
     };
 
     return error.NoDevicesFound;
