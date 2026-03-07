@@ -44,7 +44,7 @@ pub fn openForDev(io: std.Io, dev: std.posix.dev_t) OpenAutoError!Card {
 
     var it = dir.iterateAssumeFirstIteration();
     while (try it.next(io)) |entry| if (entry.kind == .character_device) {
-        const posix_name = std.posix.toPosixPath(entry.name);
+        const posix_name = std.posix.toPosixPath(entry.name) catch unreachable;
         const stat = util.stat(dir.handle, &posix_name, 0) catch continue;
         if (drm.makeDev(stat.rdev_major, stat.rdev_minor) == dev)
             return Card{ .handle = try dir.openFile(io, entry.name, .{ .mode = .read_write }) };
