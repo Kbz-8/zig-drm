@@ -66,6 +66,48 @@ pub fn getDevice(self: Card, io: std.Io, gpa: std.mem.Allocator, flags: Device.F
     return .getFromDevId(io, gpa, try self.getDevId(), flags);
 }
 
+pub const Version = struct {
+    major: u32,
+    minor: u32,
+    patch: u32,
+    name: [:0]const u8,
+    date: [:0]const u8,
+    desc: [:0]const u8,
+
+    pub fn deinit(self: Version, gpa: std.mem.Allocator) void {
+        gpa.free(self.name);
+        gpa.free(self.date);
+        gpa.free(self.desc);
+    }
+};
+
+pub const GetVersionError = error{OutOfMemory} || sys.IoctlError;
+
+pub fn getVersion(self: Card, gpa: std.mem.Allocator) GetVersionError!Version {
+    var ret: Version = undefined;
+    var version = std.mem.zeroes(sys.Version);
+
+    try sys.ioctl(self.handle.handle, .version, &version);
+    ret.name = try gpa.allocSentinel(u8, version.name_len, 0);
+    errdefer gpa.free(ret.name);
+    ret.date = try gpa.allocSentinel(u8, version.date_len, 0);
+    errdefer gpa.free(ret.date);
+    ret.desc = try gpa.allocSentinel(u8, version.desc_len, 0);
+    errdefer gpa.free(ret.desc);
+
+    version.name = ret.name.ptr;
+    version.date = ret.date.ptr;
+    version.desc = ret.desc.ptr;
+
+    try sys.ioctl(self.handle.handle, .version, &version);
+
+    ret.major = @intCast(version.version_major);
+    ret.minor = @intCast(version.version_minor);
+    ret.patch = @intCast(version.version_patch);
+
+    return ret;
+}
+
 pub fn handleEvents(
     self: Card,
     io: std.Io,
