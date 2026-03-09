@@ -11,7 +11,7 @@ pub fn ioctl(fd: std.posix.fd_t, request: Request, arg: anytype) IoctlError!void
         else => @compileError("Unsupported type: " ++ @typeName(@TypeOf(arg))),
     };
 
-    const rc = std.posix.system.ioctl(fd, @intCast(@intFromEnum(request)), casted);
+    const rc = std.posix.system.ioctl(fd, @bitCast(@intFromEnum(request)), casted);
 
     return switch (std.posix.errno(rc)) {
         .SUCCESS => {},
