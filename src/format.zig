@@ -131,6 +131,17 @@ pub const Format = enum(u32) {
 
     _, // Some formats involved with dmabuf aren't defined here
 
+    pub fn getName(self: Format) [4]u8 {
+        const int = @intFromEnum(self);
+
+        return [_]u8{
+            @as(u8, (int >> 0) & 0xff),
+            @as(u8, (int >> 8) & 0xff),
+            @as(u8, (int >> 16) & 0xff),
+            @as(u8, (int >> 24) & 0xff),
+        };
+    }
+
     fn fourccCode(a: u8, b: u8, c: u8, d: u8) u32 {
         return @as(u32, a) | (@as(u32, b) << 8) | (@as(u32, c) << 16) | (@as(u32, d) << 24);
     }
