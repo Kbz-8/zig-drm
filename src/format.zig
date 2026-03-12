@@ -1,3 +1,5 @@
+const std = @import("std");
+
 pub const Format = enum(u32) {
     pub const big_endian: u32 = 1 << 31;
 
@@ -153,9 +155,9 @@ pub const FormatModifiers = packed struct(u64) {
 
     pub fn resolve(self: FormatModifiers) Resolved {
         return switch (self.vendor) {
-            .none => .{ .none = .resolve(self.raw) },
+            .none => .{ .none = @enumFromInt(self.raw) },
             .intel => .{ .intel = self.raw }, // TODO
-            .amd => .{ .amd = self.raw }, // TODO
+            .amd => .{ .amd = .resolve(self.raw) },
             .nvidia => .{ .nvidia = .resolve(self.raw) },
             .samsung => .{ .samsung = self.raw }, // TODO
             .qualcomm => .{ .qualcomm = self.raw }, // TODO
@@ -188,7 +190,7 @@ pub const FormatModifiers = packed struct(u64) {
     pub const Resolved = union(Vendor) {
         none: None,
         intel: u56,
-        amd: u56,
+        amd: Amd,
         nvidia: Nvidia,
         samsung: u56,
         qualcomm: u56,
@@ -201,16 +203,127 @@ pub const FormatModifiers = packed struct(u64) {
         apple: u56,
     };
 
-    pub const None = union(enum) {
-        invalid: void,
-        unknown: u56,
+    pub const None = enum(u56) {
+        invalid = 0xffffffffffffff,
+        _,
+    };
 
-        pub fn resolve(raw: u56) None {
-            return switch (raw) {
-                0xffffffffffffff => .invalid,
-                else => |val| .{ .unknown = val },
+    pub const Amd = struct {
+        tile: Tile,
+        ddc: ?Ddc,
+        pipe_xor_bits: u3,
+        bank_xor_bits: u3,
+        packers: u3,
+        rb: u3,
+        pipe: u3,
+
+        pub fn resolve(raw: u64) Amd {
+            const tile_version: TileVersion = @enumFromInt(raw & 0xff);
+            const tile_bits: u5 = @intCast((raw >> 8) & 0x1f);
+            const tile = switch (tile_version) {
+                inline .gfx9,
+                .gfx10,
+                .gfx10_rbplus,
+                .gfx11,
+                => |field| @unionInit(Tile, @tagName(field), @enumFromInt(tile_bits)),
+                .legacy => Tile{ .legacy = {} },
+                .gfx12 => Tile{ .gfx12 = @enumFromInt(tile_bits) },
+            };
+
+            const has_ddc = (raw >> 13) & 0x01 == 0x01;
+            const ddc = if (has_ddc) @as(Ddc, @bitCast(@as(u7, @intCast((raw >> 14) & 0x7f)))) else null;
+
+            const pipe_xor_bits: u3 = @intCast((raw >> 21) & 0x7);
+            const bank_xor_bits: u3 = @intCast((raw >> 24) & 0x7);
+            const packers: u3 = @intCast((raw >> 27) & 0x7);
+            const rb: u3 = @intCast((raw >> 30) & 0x7);
+            const pipe: u3 = @intCast((raw >> 33) & 0x7);
+
+            return Amd{
+                .tile = tile,
+                .ddc = ddc,
+                .pipe_xor_bits = pipe_xor_bits,
+                .bank_xor_bits = bank_xor_bits,
+                .packers = packers,
+                .rb = rb,
+                .pipe = pipe,
             };
         }
+
+        pub const TileVersion = enum(u8) {
+            legacy = 0,
+            gfx9 = 1,
+            gfx10 = 2,
+            gfx10_rbplus = 3,
+            gfx11 = 4,
+            gfx12 = 5,
+        };
+
+        pub const Tile = union(TileVersion) {
+            legacy: void,
+            gfx9: Gfx9_11,
+            gfx10: Gfx9_11,
+            gfx10_rbplus: Gfx9_11,
+            gfx11: Gfx9_11,
+            gfx12: Gfx12,
+
+            pub const Gfx9_11 = enum(u5) {
+                linear = 0,
+                @"256b_s" = 1,
+                @"256b_d" = 2,
+                @"256b_r" = 3,
+                @"4kb_z" = 4,
+                @"4kb_s" = 5,
+                @"4kb_d" = 6,
+                @"4kb_r" = 7,
+                @"64kb_z" = 8,
+                @"64kb_s" = 9,
+                @"64kb_d" = 10,
+                @"64kb_r" = 11,
+                @"64kb_z_t" = 16,
+                @"64kb_s_t" = 17,
+                @"64kb_d_t" = 18,
+                @"64kb_r_t" = 19,
+                @"4kb_z_x" = 20,
+                @"4kb_s_x" = 21,
+                @"4kb_d_x" = 22,
+                @"4kb_r_x" = 23,
+                @"64kb_z_x" = 24,
+                @"64kb_s_x" = 25,
+                @"64kb_d_x" = 26,
+                @"64kb_r_x" = 27,
+                @"256kb_z_x" = 28,
+                @"256kb_s_x" = 29,
+                @"256kb_d_x" = 30,
+                @"256kb_r_x" = 31,
+            };
+
+            pub const Gfx12 = enum(u5) {
+                linear = 0,
+                @"256b_2d" = 1,
+                @"4kb_2d" = 2,
+                @"64kb_2d" = 3,
+                @"256kb_2d" = 4,
+                @"4kb_3d" = 5,
+                @"64kb_3d" = 6,
+                @"256kb_3d" = 7,
+            };
+        };
+
+        pub const Ddc = packed struct(u7) {
+            retile: bool,
+            pipe_align: bool,
+            independent_64b: bool,
+            independent_128b: bool,
+            max_compressed_block: Block,
+            constant_encode: bool,
+
+            pub const Block = enum(u2) {
+                @"64b" = 0,
+                @"128b" = 1,
+                @"256b" = 2,
+            };
+        };
     };
 
     pub const Nvidia = union(enum) {
