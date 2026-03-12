@@ -153,6 +153,19 @@ pub const FormatModifiers = packed struct(u64) {
     raw: u56,
     vendor: Vendor,
 
+    pub fn format(self: FormatModifiers, w: *std.Io.Writer) !void {
+        const resolved = self.resolve();
+
+        switch (resolved) {
+            inline .none, .amd, .nvidia => |complex, tag| {
+                try w.writeAll(@tagName(tag) ++ " { ");
+                try complex.formatInner(w);
+                try w.writeAll(" }");
+            },
+            inline else => |simple, tag| try w.print("{t}{{ raw = {x} (unimplemented) }}", .{ tag, simple }),
+        }
+    }
+
     pub fn resolve(self: FormatModifiers) Resolved {
         return switch (self.vendor) {
             .none => .{ .none = @enumFromInt(self.raw) },
@@ -204,8 +217,16 @@ pub const FormatModifiers = packed struct(u64) {
     };
 
     pub const None = enum(u56) {
+        linear = 0,
         invalid = 0xffffffffffffff,
         _,
+
+        pub fn formatInner(self: None, w: *std.Io.Writer) !void {
+            switch (self) {
+                _ => |raw| try w.print("raw = {x} (unknown)", .{raw}),
+                inline else => |tag| try w.writeAll(@tagName(tag)),
+            }
+        }
     };
 
     pub const Amd = struct {
@@ -217,7 +238,16 @@ pub const FormatModifiers = packed struct(u64) {
         rb: u3,
         pipe: u3,
 
-        pub fn resolve(raw: u64) Amd {
+        pub fn formatInner(self: Amd, w: *std.Io.Writer) !void {
+            try w.writeAll("tile = ");
+            switch (self.tile) {
+                .legacy => try w.writeAll("legacy,"),
+                inline .gfx9, .gfx10, .gfx10_rbplus, .gfx11 => |val, tag| try w.print("{t} {t},", .{ tag, val }),
+                .gfx12 => |val| try w.print("gfx12 {t},", .{val}),
+            }
+        }
+
+        pub fn resolve(raw: u56) Amd {
             const tile_version: TileVersion = @enumFromInt(raw & 0xff);
             const tile_bits: u5 = @intCast((raw >> 8) & 0x1f);
             const tile = switch (tile_version) {
@@ -336,6 +366,20 @@ pub const FormatModifiers = packed struct(u64) {
         block_linear_16bx2_32_gob: void,
         block_linear_2d: BlockLinear2D,
 
+        pub fn formatInner(self: Nvidia, w: *std.Io.Writer) !void {
+            switch (self) {
+                .block_linear_2d => |bl2d| {
+                    try w.print("height = {}, ", .{bl2d.height});
+                    try w.print("page kind = {}, ", .{bl2d.page_kind});
+                    try w.print("gob height = {t}, ", .{bl2d.gob_height});
+                    try w.print("page kind generation = {t}, ", .{bl2d.page_kind_generation});
+                    try w.print("sector layout = {t}, ", .{bl2d.sector_layout});
+                    try w.print("compression type = {t}", .{bl2d.compression_type});
+                },
+                inline else => |_, tag| try w.writeAll(@tagName(tag)),
+            }
+        }
+
         pub fn resolve(raw: u56) Nvidia {
             return switch (raw) {
                 1 => .tegra_tiled,
@@ -414,5 +458,27 @@ pub const FormatModifiers = packed struct(u64) {
         fn bl2dCode(h: u4) u56 {
             return @as(u56, h) | 0x10;
         }
+    };
+
+    pub const Arm = union(enum) {
+        afbc: Afbc,
+        misc: Misc,
+        afrc: Afrc,
+
+        pub const Afbc = enum(u56) {
+            lossless_colorspace_transform = 1 << 4,
+            split = 1 << 5,
+            sparse = 1 << 6,
+            copy_block_restrict = 1 << 7,
+            tiled = 1 << 8,
+            solid_color_blocks = 1 << 9,
+            double_buffer = 1 << 10,
+            buffer_content_hints = 1 << 11,
+            uncompressed_storage_mode = 1 << 12,
+        };
+
+        pub const Misc = enum { @"16x16_block_u_interleaved" };
+
+        pub const Afrc = struct {};
     };
 };
