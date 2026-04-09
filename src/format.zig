@@ -144,6 +144,10 @@ pub const Format = enum(u32) {
         };
     }
 
+    pub inline fn toU32(self: Format) u32 {
+        return @intFromEnum(self);
+    }
+
     fn fourccCode(a: u8, b: u8, c: u8, d: u8) u32 {
         return @as(u32, a) | (@as(u32, b) << 8) | (@as(u32, c) << 16) | (@as(u32, d) << 24);
     }
@@ -153,11 +157,15 @@ pub const FormatModifiers = packed struct(u64) {
     raw: u56,
     vendor: Vendor,
 
+    pub inline fn toU64(self: FormatModifiers) u64 {
+        return @bitCast(self);
+    }
+
     pub fn format(self: FormatModifiers, w: *std.Io.Writer) !void {
         const resolved = self.resolve();
 
         switch (resolved) {
-            inline .none, .amd, .nvidia => |complex, tag| {
+            inline .none, .amd, .nvidia, .arm, .amlogic => |complex, tag| {
                 try w.writeAll(@tagName(tag) ++ " { ");
                 try complex.formatInner(w);
                 try w.writeAll(" }");
@@ -176,9 +184,9 @@ pub const FormatModifiers = packed struct(u64) {
             .qualcomm => .{ .qualcomm = self.raw }, // TODO
             .vivante => .{ .vivante = self.raw }, // TODO
             .broadcom => .{ .broadcom = self.raw }, // TODO
-            .arm => .{ .arm = self.raw }, // TODO
+            .arm => .{ .arm = .resolve(self.raw) },
             .allwinner => .{ .allwinner = self.raw }, // TODO
-            .amlogic => .{ .amlogic = self.raw }, // TODO
+            .amlogic => .{ .amlogic = .resolve(self.raw) },
             .mtk => .{ .mtk = self.raw }, // TODO
             .apple => .{ .apple = self.raw }, // TODO
         };
@@ -209,9 +217,9 @@ pub const FormatModifiers = packed struct(u64) {
         qualcomm: u56,
         vivante: u56,
         broadcom: u56,
-        arm: u56,
+        arm: Arm,
         allwinner: u56,
-        amlogic: u56,
+        amlogic: Amlogic,
         mtk: u56,
         apple: u56,
     };
@@ -465,20 +473,161 @@ pub const FormatModifiers = packed struct(u64) {
         misc: Misc,
         afrc: Afrc,
 
-        pub const Afbc = enum(u56) {
-            lossless_colorspace_transform = 1 << 4,
-            split = 1 << 5,
-            sparse = 1 << 6,
-            copy_block_restrict = 1 << 7,
-            tiled = 1 << 8,
-            solid_color_blocks = 1 << 9,
-            double_buffer = 1 << 10,
-            buffer_content_hints = 1 << 11,
-            uncompressed_storage_mode = 1 << 12,
+        pub fn formatInner(self: Arm, w: *std.Io.Writer) !void {
+            switch (self) {
+                .misc => |misc| try w.writeAll(@tagName(misc)),
+                .afbc => |afbc| {
+                    try w.print("block size = {t}", .{afbc.block_size});
+                    if (afbc.lossless_colorspace_transform) try w.writeAll(", lossless colorspace transform");
+                    if (afbc.split) try w.writeAll(", split");
+                    if (afbc.sparse) try w.writeAll(", sparse");
+                    if (afbc.copy_block_restrict) try w.writeAll(", copy block restrict");
+                    if (afbc.tiled) try w.writeAll(", tiled");
+                    if (afbc.solid_color_blocks) try w.writeAll(", solid color blocks");
+                    if (afbc.double_buffer) try w.writeAll(", double buffer");
+                    if (afbc.buffer_content_hints) try w.writeAll(", buffer content hints");
+                    if (afbc.uncompressed_storage_mode) try w.writeAll(", uncompressed storage mode");
+                },
+                .afrc => |afrc| {
+                    try w.print("plane 0 coding unit size = {t}, ", .{afrc.plane_0_coding_unit_size});
+                    try w.print("planes 1 and 2 coding unit size = {t}, ", .{afrc.plane_1_2_coding_unit_size});
+                    try w.print("scan layout = {t}", .{afrc.scan_layout});
+                },
+            }
+        }
+
+        pub fn resolve(raw: u56) Arm {
+            const value_mask = 0xfffffffffffff;
+            const value: u52 = @intCast(raw & value_mask);
+            const raw_category: u4 = @intCast(raw >> 52 & 0xf);
+            const category: Category = @enumFromInt(raw_category);
+
+            return switch (category) {
+                .afbc => Arm{ .afbc = @bitCast(value) },
+                .misc => Arm{ .misc = @enumFromInt(value) },
+                .afrc => Arm{ .afrc = @bitCast(value) },
+            };
+        }
+
+        pub const Category = enum(u4) {
+            afbc = 0,
+            misc = 1,
+            afrc = 2,
         };
 
-        pub const Misc = enum { @"16x16_block_u_interleaved" };
+        pub const Afbc = packed struct(u52) {
+            block_size: BlockSize,
+            lossless_colorspace_transform: bool,
+            split: bool,
+            sparse: bool,
+            copy_block_restrict: bool,
+            tiled: bool,
+            solid_color_blocks: bool,
+            double_buffer: bool,
+            buffer_content_hints: bool,
+            uncompressed_storage_mode: bool,
+            _: u39 = 0,
 
-        pub const Afrc = struct {};
+            pub const BlockSize = enum(u4) {
+                @"16x16" = 1,
+                @"32x8" = 2,
+                @"64x4" = 3,
+                @"32x8_64x4" = 4,
+            };
+        };
+
+        pub const Misc = enum(u52) {
+            @"16x16_block_u_interleaved" = 1,
+        };
+
+        pub const Afrc = packed struct(u52) {
+            plane_0_coding_unit_size: CodingUnitSize,
+            plane_1_2_coding_unit_size: CodingUnitSize,
+            scan_layout: ScanLayout,
+            _: u43 = 0,
+
+            pub const CodingUnitSize = enum(u4) {
+                @"16" = 1,
+                @"24" = 2,
+                @"32" = 3,
+            };
+
+            pub const ScanLayout = enum(u1) {
+                rotation_optimized = 0,
+                scanline_optimized = 1,
+            };
+        };
+    };
+
+    pub const Amlogic = packed struct(u56) {
+        layout: Layout,
+        options: Options,
+        _: u40 = 0,
+
+        pub fn formatInner(self: Amlogic, w: *std.Io.Writer) !void {
+            try w.print("fbc, layout = {t}", .{self.layout});
+            if (self.options.mem_saving) try w.writeAll(", mem-saving");
+        }
+
+        pub fn resolve(raw: u56) Amlogic {
+            const layout_raw: u8 = @intCast(raw & 0xff);
+            const layout: Layout = @enumFromInt(layout_raw);
+
+            const options_raw: u8 = @intCast(raw >> 8 & 0xff);
+            const options: Options = @bitCast(options_raw);
+
+            return Amlogic{
+                .layout = layout,
+                .options = options,
+            };
+        }
+
+        const Layout = enum(u8) {
+            basic = 1,
+            scatter = 2,
+        };
+
+        const Options = packed struct(u8) {
+            mem_saving: bool,
+            _: u7 = 0,
+        };
+    };
+
+    pub const Vivante = packed struct(u56) {
+        color_tiling: ColorTiling,
+        compression: Compression,
+        tile_status: TileStatus,
+
+        // FIXME
+        pub fn formatInner(self: Vivante, w: *std.Io.Writer) !void {
+            try w.print("{any}", .{self});
+        }
+
+        pub fn resolve(raw: u56) Vivante {
+            return @bitCast(raw);
+        }
+
+        pub const ColorTiling = enum(u48) {
+            linear = 0,
+            tiled = 1,
+            super_tiled = 2,
+            split_tiled = 3,
+            split_super_tiled = 4,
+            _,
+        };
+
+        pub const Compression = enum(u4) {
+            none = 0,
+            dec400 = 1,
+            _,
+        };
+
+        pub const TileStatus = enum(u4) {
+            @"64_4" = 1,
+            @"64_2" = 2,
+            @"128_4" = 3,
+            @"256_4" = 4,
+            _,
+        };
     };
 };
