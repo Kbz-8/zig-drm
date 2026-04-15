@@ -153,15 +153,23 @@ pub const Format = enum(u32) {
     }
 };
 
-pub const FormatModifiers = packed struct(u64) {
+pub const FormatModifier = packed struct(u64) {
     raw: u56,
     vendor: Vendor,
 
-    pub inline fn toU64(self: FormatModifiers) u64 {
+    pub inline fn toU64(self: FormatModifier) u64 {
         return @bitCast(self);
     }
 
-    pub fn format(self: FormatModifiers, w: *std.Io.Writer) !void {
+    pub inline fn upper(self: FormatModifier) u32 {
+        return @intCast((self.toU64() >> 32) & std.math.maxInt(u32));
+    }
+
+    pub inline fn lower(self: FormatModifier) u32 {
+        return @intCast(self.toU64() & std.math.maxInt(u32));
+    }
+
+    pub fn format(self: FormatModifier, w: *std.Io.Writer) !void {
         const resolved = self.resolve();
 
         switch (resolved) {
@@ -174,7 +182,7 @@ pub const FormatModifiers = packed struct(u64) {
         }
     }
 
-    pub fn resolve(self: FormatModifiers) Resolved {
+    pub fn resolve(self: FormatModifier) Resolved {
         return switch (self.vendor) {
             .none => .{ .none = @enumFromInt(self.raw) },
             .intel => .{ .intel = self.raw }, // TODO

@@ -5,7 +5,7 @@ pub const Card = @import("Card.zig");
 pub const Device = @import("Device.zig");
 const fmt = @import("format.zig");
 pub const Format = fmt.Format;
-pub const FormatModifiers = fmt.FormatModifiers;
+pub const FormatModifier = fmt.FormatModifier;
 pub const sys = @import("sys.zig");
 pub const ModeInfo = sys.mode.ModeInfo;
 
