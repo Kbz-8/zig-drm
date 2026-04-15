@@ -181,7 +181,7 @@ pub const PlaneResources = struct {
 
 pub const Plane = struct {
     id: u32,
-    formats: []const u32,
+    formats: []const Format,
     crtc_id: u32,
     fb_id: u32,
     crtc_x: u32,
