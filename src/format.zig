@@ -157,6 +157,10 @@ pub const FormatModifier = packed struct(u64) {
     raw: u56,
     vendor: Vendor,
 
+    pub inline fn fromU64(raw: u64) FormatModifier {
+        return @bitCast(raw);
+    }
+
     pub inline fn toU64(self: FormatModifier) u64 {
         return @bitCast(self);
     }
