@@ -11,36 +11,37 @@ pub fn main(init: std.process.Init) !void {
     const device = try card.getDevice(io, gpa, .{});
     std.log.info("Device node path: {s}.", .{device.nodePath()});
 
-    const version = try card.getVersion(gpa);
+    const version = try card.getVersion(io, gpa);
     defer version.deinit(gpa);
 
     std.log.info("Version: {}.{}.{}.", .{ version.major, version.minor, version.patch });
     std.log.info("Name: {s}, date: {s}, desc: {s}.", .{ version.name, version.date, version.desc });
 
-    const res = try card.getModesettingResources(gpa);
+    const res = try card.getModesettingResources(io, gpa);
     defer res.deinit(gpa);
 
-    const connector = try chooseConnector(card, gpa, res.connectors);
+    const connector = try chooseConnector(card, io, gpa, res.connectors);
     defer connector.deinit(gpa);
     std.log.info("Selected connector {}.", .{connector.id});
 
     const mode = chooseMode(connector.modes);
     std.log.info("Selected mode {}x{}@{}.", .{ mode.hdisplay, mode.vdisplay, mode.vrefresh });
 
-    const encoder = try card.getEncoder(connector.encoder_id);
+    const encoder = try card.getEncoder(io, connector.encoder_id);
     std.log.info("Selected encoder {} (type: {t}).", .{ encoder.id, encoder.type });
 
-    const crtc = try card.getCrtc(encoder.crtc_id);
+    const crtc = try card.getCrtc(io, encoder.crtc_id);
     std.log.info("Selected crtc {} (mode valid: {}).", .{ crtc.id, crtc.mode != null });
 }
 
 fn chooseConnector(
     card: drm.Card,
+    io: std.Io,
     gpa: std.mem.Allocator,
     connectors: []const u32,
 ) !drm.Connector {
     for (connectors) |id| {
-        const connector = try card.getConnector(gpa, id);
+        const connector = try card.getConnector(io, gpa, id);
         if (connector.connection == .connected) return connector;
         connector.deinit(gpa);
     }

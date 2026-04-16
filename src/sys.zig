@@ -1,21 +1,18 @@
 const std = @import("std");
 const IOCTL = std.os.linux.IOCTL;
 
-pub const IoctlError = std.posix.UnexpectedError;
+pub const IoctlError = std.Io.Cancelable || std.posix.UnexpectedError;
 
-pub fn ioctl(fd: std.posix.fd_t, request: Request, arg: anytype) IoctlError!void {
-    const casted: usize = switch (@typeInfo(@TypeOf(arg))) {
-        .int => @intCast(arg),
-        .@"enum" => @intCast(@intFromEnum(arg)),
-        .pointer => @intFromPtr(arg),
-        else => @compileError("Unsupported type: " ++ @typeName(@TypeOf(arg))),
-    };
+pub fn ioctl(file: std.Io.File, io: std.Io, request: Request, arg: ?*anyopaque) IoctlError!void {
+    const rc = try io.operate(.{ .device_io_control = .{
+        .file = file,
+        .code = @intFromEnum(request),
+        .arg = arg,
+    } });
 
-    const rc = std.posix.system.ioctl(fd, @bitCast(@intFromEnum(request)), casted);
-
-    return switch (std.posix.errno(rc)) {
+    return switch (std.posix.errno(@bitCast(@as(isize, rc.device_io_control)))) {
         .SUCCESS => {},
-        else => |err| std.posix.unexpectedErrno(err),
+        else => |e| std.posix.unexpectedErrno(e),
     };
 }
 

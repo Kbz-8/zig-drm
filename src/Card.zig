@@ -83,11 +83,11 @@ pub const Version = struct {
 
 pub const GetVersionError = error{OutOfMemory} || sys.IoctlError;
 
-pub fn getVersion(self: Card, gpa: std.mem.Allocator) GetVersionError!Version {
+pub fn getVersion(self: Card, io: std.Io, gpa: std.mem.Allocator) GetVersionError!Version {
     var ret: Version = undefined;
     var version = std.mem.zeroes(sys.Version);
 
-    try sys.ioctl(self.handle.handle, .version, &version);
+    try sys.ioctl(self.handle, io, .version, &version);
     ret.name = try gpa.allocSentinel(u8, version.name_len, 0);
     errdefer gpa.free(ret.name);
     ret.date = try gpa.allocSentinel(u8, version.date_len, 0);
@@ -99,7 +99,7 @@ pub fn getVersion(self: Card, gpa: std.mem.Allocator) GetVersionError!Version {
     version.date = ret.date.ptr;
     version.desc = ret.desc.ptr;
 
-    try sys.ioctl(self.handle.handle, .version, &version);
+    try sys.ioctl(self.handle, io, .version, &version);
 
     ret.major = @intCast(version.version_major);
     ret.minor = @intCast(version.version_minor);
@@ -134,29 +134,29 @@ pub fn handleEvents(
     }
 }
 
-pub fn setClientCapability(self: Card, capability: sys.ClientCapability, value: u64) sys.IoctlError!void {
+pub fn setClientCapability(self: Card, io: std.Io, capability: sys.ClientCapability, value: u64) sys.IoctlError!void {
     var set_cap = sys.SetClientCap{
         .capability = capability,
         .value = value,
     };
-    try sys.ioctl(self.handle.handle, .set_client_cap, &set_cap);
+    try sys.ioctl(self.handle, io, .set_client_cap, &set_cap);
 }
 
-pub fn getCapability(self: Card, capability: sys.Capability) sys.IoctlError!u64 {
+pub fn getCapability(self: Card, io: std.Io, capability: sys.Capability) sys.IoctlError!u64 {
     var get_cap = sys.GetCap{
         .capability = capability,
         .value = 0,
     };
-    try sys.ioctl(self.handle.handle, .get_cap, &get_cap);
+    try sys.ioctl(self.handle, io, .get_cap, &get_cap);
     return get_cap.value;
 }
 
-pub fn createModesettingPropertyBlob(self: Card, data: []const u8) sys.IoctlError!u32 {
+pub fn createModesettingPropertyBlob(self: Card, io: std.Io, data: []const u8) sys.IoctlError!u32 {
     var create = std.mem.zeroInit(sys.mode.CreateBlob, .{
         .length = @as(u32, @intCast(data.len)),
         .data = @intFromPtr(data.ptr),
     });
-    try sys.ioctl(self.handle.handle, .mode_createpropblob, &create);
+    try sys.ioctl(self.handle, io, .mode_createpropblob, &create);
     return create.blob_id;
 }
 
@@ -166,11 +166,12 @@ pub const GetResourcesError = sys.IoctlError || error{OutOfMemory};
 
 pub fn getModesettingResources(
     self: Card,
+    io: std.Io,
     gpa: std.mem.Allocator,
 ) GetResourcesError!drm.ModesettingResources {
     while (true) {
         var res = std.mem.zeroes(sys.mode.CardRes);
-        try sys.ioctl(self.handle.handle, .mode_getresources, &res);
+        try sys.ioctl(self.handle, io, .mode_getresources, &res);
 
         var ret = drm.ModesettingResources{
             .min_width = res.min_width,
@@ -200,7 +201,7 @@ pub fn getModesettingResources(
         res.encoder_id_ptr = @intFromPtr(ret.encoders.ptr);
 
         const cached = res;
-        try sys.ioctl(self.handle.handle, .mode_getresources, &res);
+        try sys.ioctl(self.handle, io, .mode_getresources, &res);
 
         if (cached.count_fbs < res.count_fbs or
             cached.count_crtcs < res.count_crtcs or
@@ -220,10 +221,10 @@ pub fn getModesettingResources(
 
 pub const GetConnectorError = sys.IoctlError || error{OutOfMemory};
 
-pub fn getConnector(self: Card, gpa: std.mem.Allocator, id: u32) GetConnectorError!drm.Connector {
+pub fn getConnector(self: Card, io: std.Io, gpa: std.mem.Allocator, id: u32) GetConnectorError!drm.Connector {
     while (true) {
         var get_conn = std.mem.zeroInit(sys.mode.GetConnector, .{ .connector_id = id });
-        try sys.ioctl(self.handle.handle, .mode_getconnector, &get_conn);
+        try sys.ioctl(self.handle, io, .mode_getconnector, &get_conn);
         const cached = get_conn;
 
         const encoders = try gpa.alloc(u32, get_conn.count_encoders);
@@ -242,7 +243,7 @@ pub fn getConnector(self: Card, gpa: std.mem.Allocator, id: u32) GetConnectorErr
         get_conn.props_ptr = @intFromPtr(props.ptr);
         get_conn.prop_values_ptr = @intFromPtr(prop_values.ptr);
 
-        try sys.ioctl(self.handle.handle, .mode_getconnector, &get_conn);
+        try sys.ioctl(self.handle, io, .mode_getconnector, &get_conn);
 
         if (cached.count_encoders < get_conn.count_encoders or
             cached.count_modes < get_conn.count_modes or
@@ -274,9 +275,9 @@ pub fn getConnector(self: Card, gpa: std.mem.Allocator, id: u32) GetConnectorErr
     }
 }
 
-pub fn getEncoder(self: Card, id: u32) sys.IoctlError!drm.Encoder {
+pub fn getEncoder(self: Card, io: std.Io, id: u32) sys.IoctlError!drm.Encoder {
     var get_encoder = std.mem.zeroInit(sys.mode.GetEncoder, .{ .encoder_id = id });
-    try sys.ioctl(self.handle.handle, .mode_getencoder, &get_encoder);
+    try sys.ioctl(self.handle, io, .mode_getencoder, &get_encoder);
 
     return drm.Encoder{
         .id = id,
@@ -287,9 +288,9 @@ pub fn getEncoder(self: Card, id: u32) sys.IoctlError!drm.Encoder {
     };
 }
 
-pub fn getCrtc(self: Card, id: u32) sys.IoctlError!drm.Crtc {
+pub fn getCrtc(self: Card, io: std.Io, id: u32) sys.IoctlError!drm.Crtc {
     var crtc = std.mem.zeroInit(sys.mode.Crtc, .{ .crtc_id = id });
-    try sys.ioctl(self.handle.handle, .mode_getcrtc, &crtc);
+    try sys.ioctl(self.handle, io, .mode_getcrtc, &crtc);
 
     return drm.Crtc{
         .id = id,
@@ -303,6 +304,7 @@ pub fn getCrtc(self: Card, id: u32) sys.IoctlError!drm.Crtc {
 
 pub fn setCrtc(
     self: Card,
+    io: std.Io,
     id: u32,
     fb_id: u32,
     x: u32,
@@ -322,16 +324,16 @@ pub fn setCrtc(
         crtc.mode_valid = 1;
         crtc.mode = m;
     }
-    try sys.ioctl(self.handle.handle, .mode_setcrtc, &crtc);
+    try sys.ioctl(self.handle, io, .mode_setcrtc, &crtc);
 }
 
-pub fn createDumbBuffer(self: Card, width: u32, height: u32, bpp: u32) sys.IoctlError!drm.DumbBuffer {
+pub fn createDumbBuffer(self: Card, io: std.Io, width: u32, height: u32, bpp: u32) sys.IoctlError!drm.DumbBuffer {
     var create = std.mem.zeroInit(sys.mode.CreateDumb, .{
         .width = width,
         .height = height,
         .bpp = bpp,
     });
-    try sys.ioctl(self.handle.handle, .mode_create_dumb, &create);
+    try sys.ioctl(self.handle, io, .mode_create_dumb, &create);
 
     return drm.DumbBuffer{
         .handle = create.handle,
@@ -342,19 +344,20 @@ pub fn createDumbBuffer(self: Card, width: u32, height: u32, bpp: u32) sys.Ioctl
     };
 }
 
-pub fn destroyDumbBuffer(self: Card, handle: u32) sys.IoctlError!void {
+pub fn destroyDumbBuffer(self: Card, io: std.Io, handle: u32) sys.IoctlError!void {
     var destroy = sys.mode.DestroyDumb{ .handle = handle };
-    try sys.ioctl(self.handle.handle, .mode_destroy_dumb, &destroy);
+    try sys.ioctl(self.handle, io, .mode_destroy_dumb, &destroy);
 }
 
-pub fn mapDumbBuffer(self: Card, dumb: drm.DumbBuffer, offset: usize) sys.IoctlError!usize {
+pub fn mapDumbBuffer(self: Card, io: std.Io, dumb: drm.DumbBuffer, offset: usize) sys.IoctlError!usize {
     var map = sys.mode.MapDumb{ .handle = dumb.handle, .pad = 0, .offset = offset };
-    try sys.ioctl(self.handle.handle, .mode_map_dumb, &map);
+    try sys.ioctl(self.handle, io, .mode_map_dumb, &map);
     return @intCast(map.offset);
 }
 
 pub fn addFb2(
     self: Card,
+    io: std.Io,
     width: u32,
     height: u32,
     format: fmt.Format,
@@ -372,12 +375,12 @@ pub fn addFb2(
         .offsets = offsets,
         .flags = flags,
     });
-    try sys.ioctl(self.handle.handle, .mode_addfb2, &cmd);
+    try sys.ioctl(self.handle, io, .mode_addfb2, &cmd);
     return cmd.fb_id;
 }
 
-pub fn removeFb(self: Card, fb: u32) sys.IoctlError!void {
-    try sys.ioctl(self.handle.handle, .mode_rmfb, &fb);
+pub fn removeFb(self: Card, io: std.Io, fb: u32) sys.IoctlError!void {
+    try sys.ioctl(self.handle, io, .mode_rmfb, &fb);
 }
 
 pub fn pageFlip(
@@ -399,10 +402,10 @@ pub fn pageFlip(
 
 pub const GetPlaneResourcesError = sys.IoctlError || error{OutOfMemory};
 
-pub fn getPlaneResources(self: Card, gpa: std.mem.Allocator) GetPlaneResourcesError!drm.PlaneResources {
+pub fn getPlaneResources(self: Card, io: std.Io, gpa: std.mem.Allocator) GetPlaneResourcesError!drm.PlaneResources {
     while (true) {
         var res = std.mem.zeroes(sys.mode.GetPlaneRes);
-        try sys.ioctl(self.handle.handle, .mode_getplaneresources, &res);
+        try sys.ioctl(self.handle, io, .mode_getplaneresources, &res);
         const cached = res;
 
         const planes = try gpa.alloc(u32, res.count_planes);
@@ -421,17 +424,17 @@ pub fn getPlaneResources(self: Card, gpa: std.mem.Allocator) GetPlaneResourcesEr
 
 pub const GetPlaneError = sys.IoctlError || error{OutOfMemory};
 
-pub fn getPlane(self: Card, gpa: std.mem.Allocator, id: u32) GetPlaneError!drm.Plane {
+pub fn getPlane(self: Card, io: std.Io, gpa: std.mem.Allocator, id: u32) GetPlaneError!drm.Plane {
     while (true) {
         var get = std.mem.zeroInit(sys.mode.GetPlane, .{ .plane_id = id });
-        try sys.ioctl(self.handle.handle, .mode_getplane, &get);
+        try sys.ioctl(self.handle, io, .mode_getplane, &get);
         const cached = get;
 
         const formats = try gpa.alloc(u32, get.count_format_types);
         errdefer gpa.free(formats);
         get.format_type_ptr = @intFromPtr(formats.ptr);
 
-        try sys.ioctl(self.handle.handle, .mode_getplane, &get);
+        try sys.ioctl(self.handle, io, .mode_getplane, &get);
         if (get.count_format_types > cached.count_format_types) {
             gpa.free(formats);
             continue;
@@ -456,6 +459,7 @@ pub const GetObjectPropertiesError = sys.IoctlError || error{OutOfMemory};
 
 pub fn getObjectProperties(
     self: Card,
+    io: std.Io,
     gpa: std.mem.Allocator,
     object_id: u32,
     object_type: sys.mode.ObjType,
@@ -465,7 +469,7 @@ pub fn getObjectProperties(
             .obj_id = object_id,
             .obj_type = object_type,
         });
-        try sys.ioctl(self.handle.handle, .mode_obj_getproperties, &get);
+        try sys.ioctl(self.handle, io, .mode_obj_getproperties, &get);
         const cached = get;
 
         const keys = try gpa.alloc(u32, get.count_props);
@@ -476,7 +480,7 @@ pub fn getObjectProperties(
         errdefer gpa.free(values);
         get.prop_values_ptr = values.ptr;
 
-        try sys.ioctl(self.handle.handle, .mode_obj_getproperties, &get);
+        try sys.ioctl(self.handle, io, .mode_obj_getproperties, &get);
         if (get.count_props > cached.count_props) {
             gpa.free(keys);
             gpa.free(values);
