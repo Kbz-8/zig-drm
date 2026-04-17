@@ -4,13 +4,18 @@ const IOCTL = std.os.linux.IOCTL;
 pub const IoctlError = std.Io.Cancelable || std.posix.UnexpectedError;
 
 pub fn ioctl(file: std.Io.File, io: std.Io, request: Request, arg: ?*anyopaque) IoctlError!void {
-    const rc = try io.operate(.{ .device_io_control = .{
+    const result = try io.operate(.{ .device_io_control = .{
         .file = file,
         .code = @intFromEnum(request),
         .arg = arg,
     } });
 
-    return switch (std.posix.errno(@bitCast(@as(isize, rc.device_io_control)))) {
+    const rc = if (@import("builtin").link_libc)
+        @as(c_int, @intCast(result.device_io_control))
+    else
+        @as(usize, @bitCast(@as(isize, @intCast(result.device_io_control))));
+
+    return switch (std.posix.errno(rc)) {
         .SUCCESS => {},
         else => |e| std.posix.unexpectedErrno(e),
     };
