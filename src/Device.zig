@@ -312,7 +312,7 @@ fn sysfsUeventGet(
 
     var it = std.mem.tokenizeScalar(u8, content, '\n');
     while (it.next()) |line| {
-        if (std.mem.eql(u8, line[0..key.len], key) and line[key.len] == '=') {
+        if (line.len > key.len and std.mem.eql(u8, line[0..key.len], key) and line[key.len] == '=') {
             return gpa.dupe(u8, line[key.len + 1 ..]);
         }
     }

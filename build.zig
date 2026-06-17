@@ -19,7 +19,9 @@ pub fn build(b: *std.Build) void {
         }),
     });
     example.root_module.addImport("drm", drm);
-    b.installArtifact(example);
+    const run_example = b.addRunArtifact(example);
+    const example_step = b.step("example", "Run example.");
+    example_step.dependOn(&run_example.step);
 
     const test_exe = b.addTest(.{ .root_module = drm });
     const run_tests = b.addRunArtifact(test_exe);
