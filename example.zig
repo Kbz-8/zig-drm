@@ -34,12 +34,7 @@ pub fn main(init: std.process.Init) !void {
     std.log.info("Selected crtc {} (mode valid: {}).", .{ crtc.id, crtc.mode != null });
 }
 
-fn chooseConnector(
-    card: drm.Card,
-    io: std.Io,
-    gpa: std.mem.Allocator,
-    connectors: []const u32,
-) !drm.Connector {
+fn chooseConnector(card: drm.Card, io: std.Io, gpa: std.mem.Allocator, connectors: []const u32) !drm.Connector {
     for (connectors) |id| {
         const connector = try card.getConnector(io, gpa, id);
         if (connector.connection == .connected) return connector;

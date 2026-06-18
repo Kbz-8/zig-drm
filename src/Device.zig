@@ -19,7 +19,7 @@ bus_info: union(BusType) {
     faux: FauxBusInfo,
     virtio: void,
 },
-device_info: ?union(BusType) {
+device_info: union(BusType) {
     pci: PciDeviceInfo,
     usb: UsbDeviceInfo,
     platform: PlatformDeviceInfo,
@@ -53,7 +53,7 @@ pub fn getFromDevId(io: std.Io, gpa: std.mem.Allocator, devid: std.posix.dev_t, 
     var it = sysdir.iterate();
     var i: usize = 0;
     while (try it.next(io)) |entry| if (entry.kind == .character_device) {
-        const dev = processDevice(io, gpa, entry.name, subsystem_type, true, flags) catch continue;
+        const dev = processDevice(io, gpa, entry.name, subsystem_type, flags) catch continue;
 
         if (i >= drm.max_nodes) {
             log.err(
@@ -194,14 +194,7 @@ pub const NodeType = enum {
     }
 };
 
-fn processDevice(
-    io: std.Io,
-    gpa: std.mem.Allocator,
-    name: []const u8,
-    required_subsystem_type: BusType,
-    fetch_devinfo: bool,
-    flags: Flags,
-) !Device {
+fn processDevice(io: std.Io, gpa: std.mem.Allocator, name: []const u8, required_subsystem_type: BusType, flags: Flags) !Device {
     const max_node_length = std.mem.alignForward(usize, drm.max_node_name, @sizeOf(usize));
     const node_type = try getNodeType(name);
 
@@ -223,7 +216,7 @@ fn processDevice(
         return error.IncorrectSubsystemType;
 
     return switch (subsystem_type) {
-        .pci, .virtio => try processPciDevice(io, gpa, node, node_type, major, minor, fetch_devinfo, flags),
+        .pci, .virtio => try processPciDevice(io, gpa, node, node_type, major, minor, flags),
         .usb => error.UsbInimplemented,
         .platform => error.PlatformUnimplemented,
         .host1x => error.Host1xUnimplemented,
@@ -238,14 +231,13 @@ fn processPciDevice(
     node_type: NodeType,
     major: u32,
     minor: u32,
-    fetch_devinfo: bool,
     flags: Flags,
 ) !Device {
     var device = Device{
         .node_type = node_type,
         .node_path_buf = @splat(0),
         .bus_info = .{ .pci = try parsePciBusInfo(io, gpa, major, minor) },
-        .device_info = if (fetch_devinfo) .{ .pci = try parsePciDeviceInfo(io, major, minor, flags) } else null,
+        .device_info = .{ .pci = try parsePciDeviceInfo(io, major, minor, flags) },
     };
     @memcpy(device.node_path_buf[0..node_path.len], node_path);
     return device;
@@ -290,13 +282,7 @@ fn getPciPath(io: std.Io, buf: []u8, major: u32, minor: u32) ![]const u8 {
     return real_path;
 }
 
-fn sysfsUeventGet(
-    io: std.Io,
-    gpa: std.mem.Allocator,
-    path: []const u8,
-    comptime format: []const u8,
-    args: anytype,
-) ![]const u8 {
+fn sysfsUeventGet(io: std.Io, gpa: std.mem.Allocator, path: []const u8, comptime format: []const u8, args: anytype) ![]const u8 {
     const key = try std.fmt.allocPrint(gpa, format, args);
     defer gpa.free(key);
 
@@ -320,12 +306,7 @@ fn sysfsUeventGet(
     return error.KeyNotFound;
 }
 
-fn parseSeparateSysfsFiles(
-    io: std.Io,
-    major: u32,
-    minor: u32,
-    ignore_revision: bool,
-) !PciDeviceInfo {
+fn parseSeparateSysfsFiles(io: std.Io, major: u32, minor: u32, ignore_revision: bool) !PciDeviceInfo {
     const attrs = [_][]const u8{
         "revision",
         "vendor",
