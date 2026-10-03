@@ -1,5 +1,6 @@
 const std = @import("std");
-const dev_t = std.posix.dev_t;
+
+const dev_t = u64;
 
 pub const Card = @import("Card.zig");
 pub const Device = @import("Device.zig");
@@ -9,7 +10,6 @@ pub const FormatModifier = fmt.FormatModifier;
 pub const sys = @import("sys.zig");
 pub const ModeInfo = sys.mode.ModeInfo;
 
-const log = std.log.scoped(.drm);
 
 pub const dir_name = "/dev/dri";
 pub const primary_minor_name = "card";

@@ -1,9 +1,10 @@
 const std = @import("std");
 const path_max = std.os.linux.PATH_MAX;
 
+const dev_t = u64;
+
 const Card = @import("Card.zig");
 const drm = @import("drm.zig");
-const sys = @import("sys.zig");
 const util = @import("util.zig");
 
 const log = std.log.scoped(.drm);
@@ -36,7 +37,7 @@ pub const Flags = packed struct {
     get_pci_revision: bool = false,
 };
 
-pub fn getFromDevId(io: std.Io, gpa: std.mem.Allocator, devid: std.posix.dev_t, flags: Flags) !Device {
+pub fn getFromDevId(io: std.Io, gpa: std.mem.Allocator, devid: dev_t, flags: Flags) !Device {
     var local_devices: [drm.max_nodes]Device = undefined;
 
     const major = drm.devMajor(devid);
@@ -364,7 +365,7 @@ fn parseConfigSysfsFile(io: std.Io, major: u32, minor: u32) !PciDeviceInfo {
     };
 }
 
-fn hasRdev(dev: Device, rdev: std.posix.dev_t) bool {
+fn hasRdev(dev: Device, rdev: dev_t) bool {
     const stat = util.statPath(dev.nodePath()) catch return false;
     return drm.makeDev(stat.rdev_major, stat.rdev_minor) == rdev;
 }
